@@ -9,10 +9,6 @@ plug-ins. Whatever agent harness you wire in (Claude Code, OpenClaw,
 Codex, custom orchestrators) pulls the levers. The CRM ships no LLM,
 no provider keys, no prompt logic.
 
-This repo is the open-source CRM. A private fork at Great Creations
-(GCRM) extends it with company-specific customization; the open-source
-core stays generic and reusable.
-
 ## What's in it
 
 ### Core data model (v0 → v4)
@@ -229,9 +225,8 @@ MIT. Anyone can use, fork, ship.
 - No business logic in transports — REST/CLI/MCP/UI all dispatch
   through `backend/services/*.py`
 
-If you need any of those, fork and add them in your private fork
-(this is what GCRM does for Great Creations). The open-source core
-stays small and generic.
+If you need any of those, fork and add them yourself. The open-source
+core stays small and generic.
 
 ## Wiki map
 
