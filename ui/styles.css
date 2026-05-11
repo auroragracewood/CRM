@@ -88,6 +88,17 @@ a.active { color: var(--grey-10); }
 .topsearch input[type=search]:focus { outline: none; border-color: var(--blueberry); background: var(--grey-1); }
 mark { background: var(--blueberry); color: var(--grey-10); padding: 0 2px; }
 
+/* Contact tag chips */
+.contact-tag {
+  display: inline-block; padding: 3px 9px; font-size: 11px; font-weight: 700;
+  letter-spacing: .03em; background: var(--grey-8); color: var(--grey-1);
+  border: 1px solid var(--border);
+}
+.contact-tag.auto {
+  background: rgba(244, 207, 217, .4);
+  color: var(--copper-dark); border-color: var(--copper);
+}
+
 /* Scoring panel */
 .score-row {
   display: grid; grid-template-columns: 110px 1fr;
@@ -231,10 +242,20 @@ form .actions { display: flex; gap: 8px; margin-top: 6px; }
 }
 .btn:hover { background: var(--blueberry-dark); }
 .btn:focus { outline: none; box-shadow: 0 0 0 2px rgba(74, 95, 193, .35); }
+/* Default secondary button: dark text on light card backgrounds. The topbar
+   inverts this (white text on the dark topbar) via the override below. */
 .btn.secondary {
-  background: transparent; color: var(--grey-10); border-color: var(--grey-5);
+  background: transparent; color: var(--fg); border-color: var(--border-strong);
 }
-.btn.secondary:hover { background: var(--grey-2); border-color: var(--grey-4); }
+.btn.secondary:hover { background: var(--bg-alt); border-color: var(--fg-muted); }
+
+/* Topbar inverts the secondary button so it reads on the dark topbar. */
+.topbar .btn.secondary {
+  color: var(--grey-10); border-color: var(--grey-5);
+}
+.topbar .btn.secondary:hover {
+  background: var(--grey-2); border-color: var(--grey-4); color: var(--grey-10);
+}
 .btn.danger {
   background: transparent; color: var(--copper); border-color: var(--copper);
 }

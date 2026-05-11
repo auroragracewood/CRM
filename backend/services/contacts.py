@@ -20,9 +20,16 @@ from . import plugins as _plugins  # type: ignore
 
 
 _FIELDS = (
+    # identity
     "full_name", "first_name", "last_name", "email", "phone", "avatar_url",
     "company_id", "title", "location", "timezone", "preferred_channel",
     "custom_fields_json",
+    # v4.1 — richer human shape
+    "birthday", "pronouns", "language",
+    "linkedin_url", "twitter_url", "instagram_url", "website_url",
+    "about", "interests_json",
+    "source", "referrer",
+    "best_contact_window", "do_not_contact",
 )
 
 
@@ -48,6 +55,11 @@ def _row_to_dict(row) -> dict:
 def _validate_create(payload: dict) -> dict:
     cleaned = {k: payload.get(k) for k in _FIELDS}
     cleaned["email"] = _normalize_email(cleaned.get("email"))
+    # do_not_contact is NOT NULL in the schema; default to 0 when unspecified.
+    if cleaned.get("do_not_contact") is None:
+        cleaned["do_not_contact"] = 0
+    else:
+        cleaned["do_not_contact"] = 1 if cleaned["do_not_contact"] else 0
 
     if not (cleaned.get("full_name") or cleaned.get("first_name")
             or cleaned.get("last_name") or cleaned.get("email")):

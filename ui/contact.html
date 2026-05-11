@@ -14,46 +14,125 @@
     <span class="meta">created {{created_at}} · updated {{updated_at}}</span>
   </div>
 
+  <div class="card" style="padding:10px 14px; margin-bottom:14px">
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <span class="label-uppercase">Tags</span>
+      {{tags_html}}
+    </div>
+    <p class="muted" style="font-size:11px; margin:6px 0 0 0">
+      Pink tags starting with <code>topic:</code> were added automatically by the
+      <strong>auto-tag-from-interactions</strong> plug-in based on what was talked
+      about. The more you log interactions with real content, the more topics it learns.
+    </p>
+  </div>
+
   <div class="two-col">
 
     <div>
       <div class="card">
-        <h2>Details</h2>
+        <h2>Identity</h2>
         <form method="post" action="/contacts/{{id}}/edit">
           <input type="hidden" name="csrf" value="{{csrf}}">
           <div class="row"><label>Full name</label><input name="full_name" value="{{full_name}}"></div>
           <div class="row"><label>Email</label><input name="email" type="email" value="{{email}}"></div>
           <div class="row"><label>Phone</label><input name="phone" value="{{phone}}"></div>
           <div class="row"><label>Title</label><input name="title" value="{{title}}"></div>
+          <div class="row"><label>Pronouns</label><input name="pronouns" value="{{pronouns}}" placeholder="e.g. she/her"></div>
+          <div class="row"><label>Birthday</label><input name="birthday" value="{{birthday}}" placeholder="YYYY-MM-DD"></div>
+          <div class="row"><label>Language</label><input name="language" value="{{language}}" placeholder="en, fr-CA"></div>
           <div class="row"><label>Location</label><input name="location" value="{{location}}"></div>
-          <div class="row"><label></label>
-            <div class="actions">
-              <button class="btn" type="submit">Save changes</button>
-            </div>
+          <div class="row"><label>Timezone</label><input name="timezone" value="{{timezone}}" placeholder="America/Vancouver"></div>
+          <div class="row"><label></label><div class="actions"><button class="btn" type="submit">Save identity</button></div></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Online presence</h2>
+        <form method="post" action="/contacts/{{id}}/edit">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Website</label><input name="website_url" value="{{website_url}}" placeholder="https://"></div>
+          <div class="row"><label>LinkedIn</label><input name="linkedin_url" value="{{linkedin_url}}" placeholder="https://linkedin.com/in/..."></div>
+          <div class="row"><label>Twitter / X</label><input name="twitter_url" value="{{twitter_url}}" placeholder="https://x.com/..."></div>
+          <div class="row"><label>Instagram</label><input name="instagram_url" value="{{instagram_url}}" placeholder="https://instagram.com/..."></div>
+          <div class="row"><label></label><div class="actions"><button class="btn" type="submit">Save links</button></div></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>About + interests</h2>
+        <form method="post" action="/contacts/{{id}}/edit">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>About</label>
+            <textarea name="about" placeholder="Free-form notes about who they are, what they care about, what they've worked on, anything that helps you remember.">{{about}}</textarea>
           </div>
+          <div class="row"><label>Interests</label>
+            <input name="interests_json" value="{{interests_json}}" placeholder='["public art","copper","abbotsford"]'>
+          </div>
+          <div class="row muted" style="font-size:11px"><label></label>
+            <div>Interests is a JSON array. Add tags too via the Tags section
+              for filterable categories; use Interests for free-text notes about
+              what they care about.</div>
+          </div>
+          <div class="row"><label></label><div class="actions"><button class="btn" type="submit">Save</button></div></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Lead source + communication preferences</h2>
+        <form method="post" action="/contacts/{{id}}/edit">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Source</label><input name="source" value="{{source}}" placeholder="manual, form:contact-us, import"></div>
+          <div class="row"><label>Referrer</label><input name="referrer" value="{{referrer}}" placeholder="name of the person/company who referred them"></div>
+          <div class="row"><label>Preferred channel</label>
+            <select name="preferred_channel">
+              <option value="" {{pc_blank_sel}}>—</option>
+              <option value="email" {{pc_email_sel}}>email</option>
+              <option value="phone" {{pc_phone_sel}}>phone</option>
+              <option value="sms" {{pc_sms_sel}}>sms</option>
+              <option value="in_person" {{pc_inperson_sel}}>in person</option>
+            </select>
+          </div>
+          <div class="row"><label>Best contact window</label><input name="best_contact_window" value="{{best_contact_window}}" placeholder="weekday mornings PT"></div>
+          <div class="row"><label>Do-not-contact</label>
+            <select name="do_not_contact">
+              <option value="0" {{dnc_no_sel}}>no</option>
+              <option value="1" {{dnc_yes_sel}}>yes — exclude from all outbound</option>
+            </select>
+          </div>
+          <div class="row"><label></label><div class="actions"><button class="btn" type="submit">Save preferences</button></div></div>
         </form>
       </div>
 
       <div class="card">
         <h2>Timeline</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          Log what you talked about. Be specific — the auto-tag plug-in reads
+          this and pulls out topics like <code>topic:copper</code>,
+          <code>topic:rebrand</code>, etc., then attaches them to the contact.
+        </p>
         <form method="post" action="/contacts/{{id}}/interactions/new" style="margin-bottom:10px">
           <input type="hidden" name="csrf" value="{{csrf}}">
-          <div class="inline-form" style="grid-template-columns: 130px 1fr auto">
-            <div><label>Type</label>
-              <select name="type">
-                <option value="email">email</option>
-                <option value="call">call</option>
-                <option value="meeting">meeting</option>
-                <option value="form_submission">form_submission</option>
-                <option value="page_view">page_view</option>
-                <option value="note_system">note_system</option>
-                <option value="system">system</option>
-              </select>
-            </div>
-            <div><label>Title / body</label><input name="title" placeholder="Short title"></div>
-            <button class="btn" type="submit">Log</button>
+          <div class="row"><label>Type</label>
+            <select name="type" style="max-width:180px">
+              <option value="meeting">meeting</option>
+              <option value="call">call</option>
+              <option value="email">email</option>
+              <option value="form_submission">form_submission</option>
+              <option value="page_view">page_view</option>
+              <option value="note_system">note_system</option>
+              <option value="system">system</option>
+            </select>
           </div>
-          <input type="hidden" name="body" value="">
+          <div class="row"><label>Title</label>
+            <input name="title" placeholder="e.g. Discovery call">
+          </div>
+          <div class="row"><label>What happened</label>
+            <textarea name="body" rows="3"
+              placeholder="e.g. Discussed copper signage for their lobby. They want pricing for installation by Q2."></textarea>
+          </div>
+          <div class="row"><label></label>
+            <div class="actions"><button class="btn" type="submit">Log interaction</button></div>
+          </div>
         </form>
         <table>
           <thead><tr><th>occurred_at</th><th>type</th><th>title</th><th>body</th></tr></thead>
@@ -74,11 +153,7 @@
             </select>
           </div>
           <div class="row"><label>Body</label><textarea name="body" required></textarea></div>
-          <div class="row"><label></label>
-            <div class="actions">
-              <button class="btn" type="submit">Add note</button>
-            </div>
-          </div>
+          <div class="row"><label></label><div class="actions"><button class="btn" type="submit">Add note</button></div></div>
         </form>
         {{notes_html}}
       </div>

@@ -188,33 +188,113 @@ async def logout(request: Request, csrf: str = Form("")):
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
     with db() as conn:
         contact_count = conn.execute("SELECT COUNT(*) FROM contacts WHERE deleted_at IS NULL").fetchone()[0]
         company_count = conn.execute("SELECT COUNT(*) FROM companies WHERE deleted_at IS NULL").fetchone()[0]
-        interaction_count = conn.execute("SELECT COUNT(*) FROM interactions").fetchone()[0]
-        audit_count = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()[0]
-        recent_audit = conn.execute(
-            "SELECT ts, surface, action, object_type, object_id FROM audit_log "
-            "ORDER BY id DESC LIMIT 10"
-        ).fetchall()
-    csrf = auth_mod.csrf_token_for(sess["id"])
+        open_deals = conn.execute("SELECT COUNT(*) FROM deals WHERE status='open'").fetchone()[0]
+        open_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('open','in_progress')").fetchone()[0]
 
-    audit_rows = "".join(
-        f'<tr><td class="mono">{_h(a["ts"])}</td>'
-        f'<td>{_h(a["surface"])}</td>'
-        f'<td>{_h(a["action"])}</td>'
-        f'<td>{_h(a["object_type"])}/{_h(a["object_id"])}</td></tr>'
-        for a in recent_audit
-    ) or '<tr><td colspan="4" class="empty">No activity yet.</td></tr>'
+    def _widget(title, report_name, columns, fmt_row, params=None,
+                empty_msg="No matches."):
+        """Render a single dashboard card by running a report function."""
+        try:
+            r = reports_service.run(ctx, report_name, **(params or {}))
+        except ServiceError:
+            return f'<div class="card"><h2>{title}</h2><div class="empty">unavailable</div></div>'
+        rows = r["rows"]
+        if not rows:
+            body = f'<div class="empty" style="padding:14px">{empty_msg}</div>'
+        else:
+            head = "".join(f"<th>{_h(c)}</th>" for c in columns)
+            body = '<table><thead><tr>' + head + '</tr></thead><tbody>' + "".join(
+                fmt_row(row) for row in rows[:8]
+            ) + '</tbody></table>'
+            if len(rows) > 8:
+                body += (f'<p class="muted" style="font-size:11px;text-align:right;'
+                         f'margin-top:6px">+ {len(rows) - 8} more in '
+                         f'<a href="/reports?run={report_name}">full report</a></p>')
+        return f'<div class="card"><h2>{title}</h2>{body}</div>'
+
+    def _name(r):
+        return _h(r.get("full_name") or r.get("email") or f"#{r['id']}")
+
+    intent_widget = _widget(
+        "Top intent right now", "top_intent_now",
+        ["Contact", "Intent"],
+        lambda r: f'<tr><td><a href="/contacts/{r["id"]}">{_name(r)}</a></td>'
+                  f'<td class="mono">{r["intent"]}</td></tr>',
+        params={"limit": 10},
+        empty_msg="No contacts have intent scores yet. Recompute scores on a contact to populate this.",
+    )
+
+    dormant_widget = _widget(
+        "Dormant high-value", "dormant_high_value",
+        ["Contact", "Opp.", "Silent (days)"],
+        lambda r: f'<tr><td><a href="/contacts/{r["id"]}">{_name(r)}</a></td>'
+                  f'<td class="mono">{r["opportunity"]}</td>'
+                  f'<td class="mono">{r["days_since_last_interaction"]}</td></tr>',
+        params={"opportunity_min": 60, "days_silent": 30, "limit": 10},
+        empty_msg="Nothing dormant. Bar is opportunity ≥ 60 and ≥ 30 days silent.",
+    )
+
+    tasks_widget = _widget(
+        "Overdue tasks", "overdue_tasks",
+        ["Title", "Priority", "Assignee"],
+        lambda r: f'<tr><td>{_h(r["title"])}</td>'
+                  f'<td><span class="task-prio prio-{_h(r["priority"])}">{_h(r["priority"])}</span></td>'
+                  f'<td class="mono faint">{_h(r["assigned_email"])}</td></tr>',
+        empty_msg="Nothing overdue. Nice.",
+    )
+
+    forms_widget = _widget(
+        "Recent form submissions", "recent_form_submissions",
+        ["When", "Form", "Contact"],
+        lambda r: f'<tr><td class="mono faint">{_h(r["created_at"])}</td>'
+                  f'<td>{_h(r["form_name"])}</td>'
+                  f'<td>'
+                  + (f'<a href="/contacts/{r["contact_id"]}">'
+                     f'{_h(r["contact_name"] or r["contact_email"] or f"#{r[chr(39)+chr(99)+chr(111)+chr(110)+chr(116)+chr(97)+chr(99)+chr(116)+chr(95)+chr(105)+chr(100)+chr(39)]}")}</a>'
+                     if r.get("contact_id") else '<span class="faint">—</span>')
+                  + '</td></tr>',
+        params={"days": 14},
+        empty_msg="No form submissions in the last 14 days.",
+    )
+
+    deals_widget = _widget(
+        "Open deal pipeline", "deal_pipeline_summary",
+        ["Pipeline", "Open", "Value", "Avg prob"],
+        lambda r: f'<tr><td>{_h(r["pipeline"])}</td>'
+                  f'<td class="mono">{r["open_deals"]}</td>'
+                  f'<td class="mono">${(r["total_value_cents"] or 0)/100:,.0f}</td>'
+                  f'<td class="mono">{r["avg_probability"] or "—"}%</td></tr>',
+        empty_msg="No open deals. Create a pipeline to start tracking.",
+    )
+
+    leads_widget = _widget(
+        "Lead sources (30d)", "lead_sources",
+        ["Source", "Contacts"],
+        lambda r: f'<tr><td class="mono">{_h(r["source"])}</td>'
+                  f'<td class="mono">{r["contacts"]}</td></tr>',
+        params={"days": 30},
+        empty_msg="No new lead activity in 30 days.",
+    )
 
     return HTMLResponse(_render(
         "dashboard.html",
         topnav=_topnav("home", sess, csrf),
         contacts=str(contact_count),
         companies=str(company_count),
-        interactions=str(interaction_count),
-        audits=str(audit_count),
-        audit_rows=audit_rows,
+        open_deals=str(open_deals),
+        open_tasks=str(open_tasks),
+        intent_widget=intent_widget,
+        dormant_widget=dormant_widget,
+        tasks_widget=tasks_widget,
+        forms_widget=forms_widget,
+        deals_widget=deals_widget,
+        leads_widget=leads_widget,
     ))
 
 
@@ -283,7 +363,16 @@ def contact_detail(contact_id: int, request: Request, portal_token: str = ""):
     notes_list = notes_service.list_for_contact(ctx, contact_id)
     scores_data = scoring_service.get_scores(ctx, contact_id)
     portal_tokens_list = portals_service.list_for_contact(ctx, contact_id)
+    # v4.1 — show the contact's tags up front so users can SEE auto-tags appear
+    from .services import tags as _tags_svc
+    contact_tags = _tags_svc.list_for_contact(ctx, contact_id)
     csrf = auth_mod.csrf_token_for(sess["id"])
+
+    tags_html = "".join(
+        f'<span class="contact-tag{(" auto" if t["name"].startswith("topic:") else "")}">'
+        f'{_h(t["name"])}</span>'
+        for t in contact_tags
+    ) or '<span class="faint" style="font-size:12px">No tags yet. They appear here when you (or a plug-in) add them.</span>'
 
     # Build scores HTML (compact bar visualization with evidence on hover).
     score_order = [
@@ -408,6 +497,9 @@ def contact_detail(contact_id: int, request: Request, portal_token: str = ""):
         + f'<tbody>{tokens_table}</tbody></table>'
     )
 
+    pc = contact.get("preferred_channel") or ""
+    dnc = 1 if contact.get("do_not_contact") else 0
+
     return HTMLResponse(_render(
         "contact.html",
         topnav=_topnav("contacts", sess, csrf),
@@ -417,6 +509,26 @@ def contact_detail(contact_id: int, request: Request, portal_token: str = ""):
         phone=_h(contact.get("phone") or ""),
         title=_h(contact.get("title") or ""),
         location=_h(contact.get("location") or ""),
+        timezone=_h(contact.get("timezone") or ""),
+        pronouns=_h(contact.get("pronouns") or ""),
+        birthday=_h(contact.get("birthday") or ""),
+        language=_h(contact.get("language") or ""),
+        website_url=_h(contact.get("website_url") or ""),
+        linkedin_url=_h(contact.get("linkedin_url") or ""),
+        twitter_url=_h(contact.get("twitter_url") or ""),
+        instagram_url=_h(contact.get("instagram_url") or ""),
+        about=_h(contact.get("about") or ""),
+        interests_json=_h(contact.get("interests_json") or ""),
+        source=_h(contact.get("source") or ""),
+        referrer=_h(contact.get("referrer") or ""),
+        best_contact_window=_h(contact.get("best_contact_window") or ""),
+        pc_blank_sel=("selected" if pc == "" else ""),
+        pc_email_sel=("selected" if pc == "email" else ""),
+        pc_phone_sel=("selected" if pc == "phone" else ""),
+        pc_sms_sel=("selected" if pc == "sms" else ""),
+        pc_inperson_sel=("selected" if pc == "in_person" else ""),
+        dnc_no_sel=("selected" if not dnc else ""),
+        dnc_yes_sel=("selected" if dnc else ""),
         created_at=_h(contact.get("created_at")),
         updated_at=_h(contact.get("updated_at")),
         csrf=csrf,
@@ -424,6 +536,7 @@ def contact_detail(contact_id: int, request: Request, portal_token: str = ""):
         notes_html=notes_html,
         scores_html=scores_html,
         portal_block=portal_block,
+        tags_html=tags_html,
     ))
 
 
@@ -1216,26 +1329,32 @@ async def public_form_submit(slug: str, request: Request):
 
 
 @app.post("/contacts/{contact_id}/edit")
-async def contact_edit_form(
-    contact_id: int,
-    request: Request,
-    full_name: str = Form(""),
-    email: str = Form(""),
-    phone: str = Form(""),
-    title: str = Form(""),
-    location: str = Form(""),
-    csrf: str = Form(""),
-):
+async def contact_edit_form(contact_id: int, request: Request):
+    """Accept any of the rich-contact field set. Empty strings clear the
+    field; missing form keys leave the existing value alone."""
     sess = _require_session(request)
-    _csrf_check(request, sess, csrf)
+    form_data = await request.form()
+    _csrf_check(request, sess, form_data.get("csrf", ""))
     ctx = _ctx_from_session(sess)
-    payload = {
-        "full_name": full_name.strip() or None,
-        "email": email.strip() or None,
-        "phone": phone.strip() or None,
-        "title": title.strip() or None,
-        "location": location.strip() or None,
+
+    # Build a payload from whichever sub-form posted. Only the fields the
+    # form actually submitted appear in form_data — others are left as-is.
+    allowed = {
+        "full_name", "email", "phone", "title", "location", "timezone",
+        "pronouns", "birthday", "language",
+        "website_url", "linkedin_url", "twitter_url", "instagram_url",
+        "about", "interests_json", "source", "referrer",
+        "best_contact_window", "preferred_channel",
     }
+    payload = {}
+    for k in allowed:
+        if k in form_data:
+            v = (form_data.get(k) or "").strip()
+            payload[k] = v or None
+    if "do_not_contact" in form_data:
+        payload["do_not_contact"] = 1 if form_data.get("do_not_contact") in ("1", "true", "on", "yes") else 0
+    if not payload:
+        return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
     try:
         contacts_service.update(ctx, contact_id, payload)
     except ServiceError as e:

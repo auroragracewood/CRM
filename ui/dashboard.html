@@ -7,30 +7,27 @@
 </head>
 <body>
 {{topnav}}
-<main class="content">
+<main class="content content-wide">
 
   <div class="pagebar">
     <h1>Dashboard</h1>
-    <span class="meta">All-time totals</span>
+    <span class="meta">what to look at first</span>
   </div>
 
   <div class="stats">
     <div class="stat"><div class="num">{{contacts}}</div><div class="label">Contacts</div></div>
     <div class="stat"><div class="num">{{companies}}</div><div class="label">Companies</div></div>
-    <div class="stat"><div class="num">{{interactions}}</div><div class="label">Interactions</div></div>
-    <div class="stat"><div class="num">{{audits}}</div><div class="label">Audit entries</div></div>
+    <div class="stat"><div class="num">{{open_deals}}</div><div class="label">Open deals</div></div>
+    <div class="stat"><div class="num">{{open_tasks}}</div><div class="label">Open tasks</div></div>
   </div>
 
-  <div class="card">
-    <h2>Recent activity</h2>
-    <table>
-      <thead>
-        <tr><th>ts</th><th>surface</th><th>action</th><th>object</th></tr>
-      </thead>
-      <tbody>
-        {{audit_rows}}
-      </tbody>
-    </table>
+  <div class="reports-grid">
+    {{intent_widget}}
+    {{dormant_widget}}
+    {{tasks_widget}}
+    {{forms_widget}}
+    {{deals_widget}}
+    {{leads_widget}}
   </div>
 
 </main>
