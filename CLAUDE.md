@@ -37,7 +37,7 @@ webhook tables.
 ## Layout
 
 ```
-GCRM/
+CRM/
 ├── README.md, CLAUDE.md, LICENSE      — orientation
 ├── server.py, start.bat               — launch
 ├── setup.py                           — first-run wizard
@@ -171,8 +171,8 @@ callable. See `agent_surface/plugins/README.md` and `example_fit_score.py`
 
 - **No LLM/AI provider code in core.** Plug-ins can call OpenAI/Anthropic;
   core stays provider-agnostic.
-- **No multi-tenant / parent-entity / subsidiary logic in core.** GC's
-  fork (private "GCRM") may add it. Public CRM stays single-company.
+- **No multi-tenant / parent-entity / subsidiary logic in core.** Forks
+  can add it. Public CRM stays single-company.
 - **No Docker, no build steps, no frontend framework.**
 - **No business logic in transports.** Service layer is the single source.
 - **Private notes never go in webhook payloads, never go in the FTS5

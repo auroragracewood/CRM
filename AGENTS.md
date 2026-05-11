@@ -12,8 +12,7 @@ of this.
 
 ## Identity of this software
 
-**Name:** CRM (this open-source codebase) / GCRM (the private fork at
-Great Creations).
+**Name:** CRM.
 
 **One-line:** A single-company FastAPI + SQLite CRM where every action
 lives in a service-layer module and is exposed identically through

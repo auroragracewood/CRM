@@ -6,8 +6,6 @@ This is an open-source CRM. Generic. Single-company. Self-hosted. Designed so an
 
 The CRM is the body. The agent is the brain. The body has nerve endings — API, MCP, CLI, webhooks, cron, skills, plug-ins, prompts, connectors, scripts, markdown. Whatever harness you wire in pulls the levers. The CRM ships **no LLM, no provider keys, no prompt logic**. It exposes operations; any agent operates them.
 
-> Note: this folder is where the generic CRM is being built. Once it's solid, a private fork becomes **GCRM** — Great Creations' internal instance with multi-subsidiary plumbing wired in to aurora-gracewood.com and greatcreations.art. **The public/open-source repo is "CRM."** GCRM is private, referenced only in legal/privacy fine print.
-
 ---
 
 ## Status (v4.1 — 2026-05-11)
@@ -40,7 +38,7 @@ A self-hosted CRM whose every action is callable through multiple surfaces — U
 3. **No AI inside.** The CRM is provider-agnostic. Agent harnesses connect from outside. No LLM dependencies in core, no prompt logic, no key management.
 4. **Deterministic vs creative split.** CRM stores, exposes, validates, enforces, logs, fires. Agent summarizes, decides, drafts, analyzes, recommends, chains actions. Do not blur this line in the public CRM. That separation is what makes the design durable.
 5. **One firehose.** Every meaningful event lands in one `interactions` table. Timeline, audit input, and agent context all share one source.
-6. **Single-company by default.** No multi-tenant logic. No parent/subsidiary model. Each install serves one company. If a fork needs multi-entity (GCRM does), it's additive.
+6. **Single-company by default.** No multi-tenant logic. No parent/subsidiary model. Each install serves one company. If a fork needs multi-entity, it's additive.
 7. **Boring stack.** FastAPI + SQLite + vanilla JS templates. Same pattern as Aurora-Gracewood. No Docker, no Postgres, no React, no build step, no new tooling decisions.
 8. **Self-host first.** Clone the repo, run `setup.py`, you're running in five minutes.
 9. **Audit and recovery from day one.** Every mutation writes audit log. Soft-delete on long-lived records (contacts, companies). Webhook delivery has retry log. API keys are revocable.
@@ -73,7 +71,7 @@ The bullets below describe the *target* product across all versions. Section 9 s
 ## 4. What it does NOT do (and why)
 
 - **No multi-tenant / SaaS layer** — each install is one company. Simpler schema, faster ship.
-- **No parent/subsidiary model in core** — too specific to be a generic feature. GCRM's fork adds it; CRM doesn't ship it.
+- **No parent/subsidiary model in core** — too specific to be a generic feature. Forks can add it; the core doesn't ship it.
 - **No LLM features in core** — that's the agent harness's job (or a plug-in's). We provide levers; they decide what to pull.
 - **No Docker, no Postgres, no React, no build step** — boring stack on purpose.
 - **No relationship graph visualization** — additive once interaction data is rich enough to mine; not core.
@@ -263,7 +261,7 @@ Remote automation should use **REST API** or **MCP server**. The CLI's purpose i
 - **webhooks** — url, event_types_json, secret, active
 - **webhook_events** — event_type, payload_json, target_url, status, attempts, sent_at, response
 
-The schema is designed so adding entity-aware logic later (for the GCRM fork) is purely additive: a new `entities` table + a `contact_entities` join + nullable `entity_id` on relevant tables. No core schema needs to change.
+The schema is designed so adding entity-aware logic later in a fork is purely additive: a new `entities` table + a `contact_entities` join + nullable `entity_id` on relevant tables. No core schema needs to change.
 
 ---
 
@@ -365,7 +363,7 @@ Why this stack: it's the one proven in Aurora-Gracewood. Same patterns mean less
 ## 8. Repo structure
 
 ```
-GCRM/                              ← folder name kept; "CRM" is the product name
+CRM/
 ├── README.md                      install + quickstart for self-hosters
 ├── LICENSE                        MIT
 ├── CLAUDE.md                      guide for AI agents working ON the codebase
@@ -398,7 +396,7 @@ GCRM/                              ← folder name kept; "CRM" is the product na
 │   ├── contacts.html, contact.html
 │   ├── companies.html, company.html
 │   ├── settings.html
-│   ├── styles.css                 re-skinnable for GCRM at fork time
+│   ├── styles.css                 re-skinnable at fork time
 │   └── app.js
 │   # (v1 will add: pipelines.html, deals.html, tasks.html, forms.html)
 │
@@ -493,21 +491,7 @@ Goal: every common workflow has a skill, prompt, or connector.
 
 ---
 
-## 10. The GCRM relationship
-
-This repo's product is the open-source CRM. **GCRM is a private internal fork** Great Creations uses. When CRM is solid, the GCRM fork:
-
-1. Adds an `entities` table + `contact_entities` join (multi-subsidiary model specific to GC).
-2. Wires in connectors for aurora-gracewood.com and greatcreations.art (data ingestion from those sites' user accounts and form submissions).
-3. Re-skins the CSS to GC's brand.
-4. Adds GC-specific cron jobs, plug-ins, and skills.
-5. Wires up the agent harness (Claude Code / OpenClaw / whatever) with API keys, webhook endpoints, and dedicated prompts.
-
-**GCRM is invisible to the open-source side.** It's referenced only in GC's own legal/privacy fine print. Outside contributors to CRM never see it.
-
----
-
-## 11. Documentation principle
+## 10. Documentation principle
 
 Each surface gets a dedicated doc targeted at the audience that uses it:
 
@@ -522,7 +506,7 @@ An agent reading `skills/*.md` and `docs/mcp.md` should be able to operate the C
 
 ---
 
-## 12. Deployment principle
+## 11. Deployment principle
 
 `setup.py` + `start.bat` is the install.
 
@@ -538,7 +522,7 @@ For production self-hosters: `deploy.py` is provided as a reference for the Auro
 
 ---
 
-## 13. What an agent can do, day one
+## 12. What an agent can do, day one
 
 After install, point Claude Code / OpenClaw / Codex / Hermes at the CRM via MCP (or REST + API key). The agent can:
 
@@ -558,12 +542,12 @@ That's the whole design.
 
 ---
 
-## 14. License
+## 13. License
 
 MIT. Open source. Anyone can use, fork, or ship.
 
 ---
 
-## 15. The one-sentence definition
+## 14. The one-sentence definition
 
 **CRM is an open-source, self-hostable, single-company customer relations management application whose every action is operable through UI, REST API, MCP server, CLI, skills, webhooks, cron, and plug-ins — so any AI agent harness can serve as its nervous system without anything LLM-specific being baked into the CRM itself.**
