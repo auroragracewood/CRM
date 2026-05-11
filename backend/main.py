@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import auth as auth_mod
@@ -24,6 +24,12 @@ from .services import (
     companies as companies_service,
     interactions as interactions_service,
     notes as notes_service,
+    pipelines as pipelines_service,
+    deals as deals_service,
+    tasks as tasks_service,
+    forms as forms_service,
+    search as search_service,
+    duplicates as duplicates_service,
 )
 from .services.contacts import ServiceError
 
@@ -87,6 +93,9 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
     items = [("Dashboard", "/", "home"),
              ("Contacts", "/contacts", "contacts"),
              ("Companies", "/companies", "companies"),
+             ("Pipelines", "/pipelines", "pipelines"),
+             ("Tasks", "/tasks", "tasks"),
+             ("Forms", "/forms", "forms"),
              ("Settings", "/settings", "settings")]
     links = "".join(
         f'<a href="{href}"{"class=active" if key == active else ""}>{label}</a>'.replace(
@@ -98,6 +107,9 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
         '<header class="topbar">'
         '<span class="brand">CRM</span>'
         f'<nav>{links}</nav>'
+        '<form method="get" action="/search" class="topsearch">'
+        '<input type="search" name="q" placeholder="Search contacts, companies, notes…">'
+        '</form>'
         '<form method="post" action="/logout" style="display:inline">'
         f'<input type="hidden" name="csrf" value="{csrf}">'
         f'<span class="user">{_h(sess["email"])}<span class="role">{_h(sess["role"])}</span></span> '
@@ -450,6 +462,626 @@ async def company_delete_form(company_id: int, request: Request, csrf: str = For
     except ServiceError:
         pass
     return RedirectResponse("/companies", status_code=303)
+
+
+# ---------- pipelines + deals (kanban) ----------
+
+def _deal_card_html(deal: dict, csrf: str, stages: list[dict]) -> str:
+    """Render one deal card inside a kanban column."""
+    value_str = ""
+    if deal.get("value_cents") is not None:
+        currency = (deal.get("currency") or "").upper()
+        value_str = f"<div class='deal-value'>{deal['value_cents']/100:,.0f} {currency}</div>"
+    prob = (f"<span class='faint mono'>{deal['probability']}%</span>"
+            if deal.get("probability") is not None else "")
+    # Build stage options for the inline move dropdown
+    stage_options = "".join(
+        f'<option value="{s["id"]}"{ " selected" if s["id"] == deal["stage_id"] else ""}>{_h(s["name"])}</option>'
+        for s in stages
+    )
+    return (
+        f'<div class="deal-card" data-deal-id="{deal["id"]}">'
+        f'  <div class="deal-title">{_h(deal["title"])}</div>'
+        f'  {value_str}'
+        f'  <div class="deal-meta">'
+        f'    <span class="deal-status status-{_h(deal["status"])}">{_h(deal["status"])}</span> '
+        f'    {prob}'
+        f'  </div>'
+        f'  <form method="post" action="/deals/{deal["id"]}/move" class="deal-move">'
+        f'    <input type="hidden" name="csrf" value="{csrf}">'
+        f'    <select name="stage_id" onchange="this.form.submit()">{stage_options}</select>'
+        f'  </form>'
+        f'</div>'
+    )
+
+
+@app.get("/pipelines", response_class=HTMLResponse)
+def pipelines_page(request: Request, pipeline_id: int = 0):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    pipelines_list = pipelines_service.list_pipelines(ctx)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
+    # Pipeline selector strip
+    if pipelines_list:
+        if not pipeline_id:
+            pipeline_id = pipelines_list[0]["id"]
+        selector = "".join(
+            f'<a href="/pipelines?pipeline_id={p["id"]}"'
+            f'   class="pipeline-chip{" active" if p["id"] == pipeline_id else ""}">'
+            f'{_h(p["name"])}'
+            f'   <span class="muted">· {_h(p["type"])}</span>'
+            f'</a>'
+            for p in pipelines_list
+        )
+    else:
+        selector = '<span class="faint">No pipelines yet. Create one below.</span>'
+
+    # Kanban for selected pipeline
+    kanban_html = ""
+    active = next((p for p in pipelines_list if p["id"] == pipeline_id), None)
+    if active:
+        deals_data = deals_service.list_(ctx, pipeline_id=active["id"], limit=500)
+        deals_by_stage: dict[int, list[dict]] = {}
+        for d in deals_data["items"]:
+            deals_by_stage.setdefault(d["stage_id"], []).append(d)
+
+        columns = []
+        for stage in active["stages"]:
+            stage_deals = deals_by_stage.get(stage["id"], [])
+            sum_value = sum((d.get("value_cents") or 0) for d in stage_deals)
+            badge = ""
+            if stage.get("is_won"):
+                badge = '<span class="stage-flag won">won</span>'
+            elif stage.get("is_lost"):
+                badge = '<span class="stage-flag lost">lost</span>'
+            cards = "".join(_deal_card_html(d, csrf, active["stages"]) for d in stage_deals)
+            if not cards:
+                cards = '<div class="kanban-empty">no deals</div>'
+
+            columns.append(
+                f'<div class="kanban-col">'
+                f'  <div class="kanban-col-head">'
+                f'    <span class="kanban-col-name">{_h(stage["name"])}</span> '
+                f'    {badge}'
+                f'    <span class="kanban-col-count">{len(stage_deals)}</span>'
+                f'    {("<div class=&#34;kanban-col-sum mono faint&#34;>$" + f"{sum_value/100:,.0f}" + "</div>") if sum_value else ""}'
+                f'  </div>'
+                f'  <div class="kanban-col-body">{cards}</div>'
+                f'  <form method="post" action="/deals/new" class="kanban-newdeal">'
+                f'    <input type="hidden" name="csrf" value="{csrf}">'
+                f'    <input type="hidden" name="pipeline_id" value="{active["id"]}">'
+                f'    <input type="hidden" name="stage_id" value="{stage["id"]}">'
+                f'    <input type="text" name="title" placeholder="+ new deal here" required>'
+                f'    <button class="btn secondary" type="submit">Add</button>'
+                f'  </form>'
+                f'</div>'
+            )
+        kanban_html = (
+            f'<div class="kanban">{"".join(columns)}</div>'
+        )
+
+    return HTMLResponse(_render(
+        "pipelines.html",
+        topnav=_topnav("pipelines", sess, csrf),
+        selector=selector,
+        kanban=kanban_html,
+        csrf=csrf,
+    ))
+
+
+@app.post("/pipelines/new")
+async def pipelines_create_form(request: Request, name: str = Form(...),
+                                template: str = Form("sales"), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        p = pipelines_service.create_from_template(ctx, name, template)
+    except ServiceError as e:
+        return RedirectResponse(f"/pipelines?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/pipelines?pipeline_id={p['id']}", status_code=303)
+
+
+@app.post("/deals/new")
+async def deal_create_form(
+    request: Request,
+    title: str = Form(...),
+    pipeline_id: int = Form(...), stage_id: int = Form(...),
+    contact_id: int = Form(None), company_id: int = Form(None),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        deals_service.create(ctx, {
+            "title": title, "pipeline_id": pipeline_id, "stage_id": stage_id,
+            "contact_id": contact_id, "company_id": company_id,
+        })
+    except ServiceError as e:
+        return RedirectResponse(f"/pipelines?pipeline_id={pipeline_id}&error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/pipelines?pipeline_id={pipeline_id}", status_code=303)
+
+
+@app.post("/deals/{deal_id}/move")
+async def deal_move_form(deal_id: int, request: Request,
+                         stage_id: int = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        d = deals_service.update(ctx, deal_id, {"stage_id": stage_id})
+    except ServiceError as e:
+        return RedirectResponse(f"/pipelines?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/pipelines?pipeline_id={d['pipeline_id']}", status_code=303)
+
+
+# ---------- tasks ----------
+
+def _task_row_html(t: dict, csrf: str) -> str:
+    overdue_cls = ""
+    if t.get("due_date") and t["status"] in ("open", "in_progress") and t["due_date"] < int(__import__("time").time()):
+        overdue_cls = " overdue"
+    due_str = ""
+    if t.get("due_date"):
+        import time as _t
+        due_str = _t.strftime("%Y-%m-%d", _t.localtime(t["due_date"]))
+    done_cls = " task-done" if t["status"] == "done" else ""
+
+    return (
+        f'<tr class="task-row{overdue_cls}{done_cls}">'
+        f'  <td style="width:30px">'
+        f'    {("<form method=&#34;post&#34; action=&#34;/tasks/" + str(t["id"]) + "/complete&#34; style=&#34;display:inline&#34;>"          "<input type=&#34;hidden&#34; name=&#34;csrf&#34; value=&#34;" + csrf + "&#34;>"          "<button class=&#34;btn secondary&#34; style=&#34;padding:2px 8px&#34; title=&#34;Mark done&#34;>✓</button>"          "</form>") if t["status"] != "done" else "<span class=&#34;faint&#34;>done</span>"}'
+        f'  </td>'
+        f'  <td><strong>{_h(t["title"])}</strong>'
+        + (f'<div class="muted" style="font-size:11.5px">{_h(t["description"])[:140]}</div>' if t.get("description") else "")
+        + f'</td>'
+        f'  <td><span class="task-prio prio-{_h(t["priority"])}">{_h(t["priority"])}</span></td>'
+        f'  <td class="mono">{_h(due_str)}</td>'
+        f'  <td>{_h(t["status"])}</td>'
+        f'  <td><form method="post" action="/tasks/{t["id"]}/delete" style="display:inline" onsubmit="return confirm(&#39;Delete this task?&#39;)">'
+        f'    <input type="hidden" name="csrf" value="{csrf}">'
+        f'    <button class="btn danger" style="padding:2px 8px">×</button>'
+        f'  </form></td>'
+        f'</tr>'
+    )
+
+
+@app.get("/tasks", response_class=HTMLResponse)
+def tasks_page(request: Request, view: str = "open"):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    if view == "overdue":
+        result = tasks_service.list_(ctx, overdue=True, limit=500)
+    elif view == "mine":
+        result = tasks_service.list_(ctx, assigned_to=sess["user_id"], status="open", limit=500)
+    elif view == "done":
+        result = tasks_service.list_(ctx, status="done", limit=500)
+    elif view == "all":
+        result = tasks_service.list_(ctx, limit=500)
+    else:
+        view = "open"
+        result = tasks_service.list_(ctx, status="open", limit=500)
+
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    rows = "".join(_task_row_html(t, csrf) for t in result["items"])
+    if not rows:
+        rows = '<tr><td colspan="6" class="empty">No tasks match this view.</td></tr>'
+
+    def _tab(label, key):
+        cls = "active" if key == view else ""
+        return f'<a href="/tasks?view={key}" class="task-tab {cls}">{label}</a>'
+
+    tabs = "".join([
+        _tab("Open", "open"),
+        _tab("My open", "mine"),
+        _tab("Overdue", "overdue"),
+        _tab("Done", "done"),
+        _tab("All", "all"),
+    ])
+
+    return HTMLResponse(_render(
+        "tasks.html",
+        topnav=_topnav("tasks", sess, csrf),
+        tabs=tabs,
+        rows=rows,
+        total=str(result["total"]),
+        csrf=csrf,
+    ))
+
+
+@app.post("/tasks/new")
+async def task_create_form(
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    priority: str = Form("normal"),
+    due_date: str = Form(""),
+    contact_id: int = Form(None),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    payload = {
+        "title": title.strip(),
+        "description": description.strip() or None,
+        "priority": priority,
+        "contact_id": contact_id,
+    }
+    # Allow YYYY-MM-DD due_date entry; convert to unix.
+    if due_date.strip():
+        try:
+            import time as _t
+            ts = int(_t.mktime(_t.strptime(due_date.strip(), "%Y-%m-%d")))
+            payload["due_date"] = ts
+        except ValueError:
+            return RedirectResponse(f"/tasks?error=Invalid+date+format+(use+YYYY-MM-DD)", status_code=303)
+    try:
+        tasks_service.create(ctx, payload)
+    except ServiceError as e:
+        return RedirectResponse(f"/tasks?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/tasks", status_code=303)
+
+
+@app.post("/tasks/{task_id}/complete")
+async def task_complete_form(task_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        tasks_service.complete(ctx, task_id)
+    except ServiceError:
+        pass
+    return RedirectResponse("/tasks", status_code=303)
+
+
+@app.post("/tasks/{task_id}/delete")
+async def task_delete_form(task_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        tasks_service.delete(ctx, task_id)
+    except ServiceError:
+        pass
+    return RedirectResponse("/tasks", status_code=303)
+
+
+# ---------- forms (admin UI) ----------
+
+@app.get("/forms", response_class=HTMLResponse)
+def forms_page(request: Request, created: str = ""):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    forms_list = forms_service.list_(ctx, include_inactive=True)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    base_url = os.environ.get("CRM_BASE_URL", "").rstrip("/") or ""
+
+    rows = []
+    for f in forms_list:
+        public_url = f'{base_url}/f/{f["slug"]}' if base_url else f'/f/{f["slug"]}'
+        status_pill = (
+            '<span class="task-prio prio-normal">active</span>' if f.get("active")
+            else '<span class="task-prio prio-low">inactive</span>'
+        )
+        rows.append(
+            f'<tr><td><a href="/forms/{f["id"]}">{_h(f["name"])}</a></td>'
+            f'<td><a class="mono" href="{public_url}" target="_blank">/f/{_h(f["slug"])}</a></td>'
+            f'<td>{status_pill}</td>'
+            f'<td class="mono faint">{_h(f.get("created_at"))}</td>'
+            f'</tr>'
+        )
+    rows_html = "\n".join(rows) or '<tr><td colspan="4" class="empty">No forms yet. Create one below.</td></tr>'
+
+    created_block = (
+        f'<div class="flash success">Form created. Public URL: '
+        f'<code><a href="/f/{_h(created)}" target="_blank">/f/{_h(created)}</a></code></div>'
+        if created else ""
+    )
+
+    return HTMLResponse(_render(
+        "forms.html",
+        topnav=_topnav("forms", sess, csrf),
+        rows=rows_html,
+        csrf=csrf,
+        created_block=created_block,
+    ))
+
+
+@app.post("/forms/new")
+async def form_create_simple(
+    request: Request,
+    slug: str = Form(...), name: str = Form(...),
+    description: str = Form(""),
+    csrf: str = Form(""),
+):
+    """Create a simple form preset: name + email + interest + message.
+    Power users can post the full schema via /api/forms; this is the one-click
+    'I just need a contact form' affordance from the UI."""
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    schema = {"fields": [
+        {"key": "name", "type": "text", "label": "Your name", "required": True},
+        {"key": "email", "type": "email", "label": "Email", "required": True},
+        {"key": "interest", "type": "select", "label": "What's this about?",
+         "options": ["sales", "support", "partnership", "other"]},
+        {"key": "message", "type": "textarea", "label": "Message"},
+    ]}
+    routing = {
+        "tags": ["lead", f"form:{slug}"],
+        "interest_tag_prefix": "interest:",
+        "auto_create_contact": True,
+        "match_by_email": True,
+    }
+    try:
+        form = forms_service.create(ctx, {
+            "slug": slug, "name": name, "description": description.strip() or None,
+            "schema": schema, "routing": routing, "active": True,
+        })
+    except ServiceError as e:
+        return RedirectResponse(f"/forms?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/forms?created={form['slug']}", status_code=303)
+
+
+@app.get("/forms/{form_id}", response_class=HTMLResponse)
+def form_detail(form_id: int, request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    try:
+        form = forms_service.get(ctx, form_id)
+    except ServiceError as e:
+        raise HTTPException(404, e.message)
+    subs = forms_service.list_submissions(ctx, form_id, limit=100)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
+    base_url = os.environ.get("CRM_BASE_URL", "").rstrip("/") or ""
+    public_url = f'{base_url}/f/{form["slug"]}' if base_url else f'/f/{form["slug"]}'
+
+    sub_rows = []
+    import json as _json
+    for s in subs["items"]:
+        try:
+            payload = _json.loads(s.get("payload_json") or "{}")
+        except Exception:
+            payload = {}
+        payload_pretty = "; ".join(f"{k}={v!r}" for k, v in payload.items())
+        sub_rows.append(
+            f'<tr><td class="mono faint">{_h(s.get("created_at"))}</td>'
+            f'<td>'
+            + (f'<a href="/contacts/{s["contact_id"]}">#{s["contact_id"]}</a>' if s.get("contact_id") else '<span class="faint">none</span>')
+            + f'</td>'
+            f'<td class="mono" style="font-size:11.5px">{_h(payload_pretty)[:240]}</td>'
+            f'</tr>'
+        )
+    sub_rows_html = "\n".join(sub_rows) or '<tr><td colspan="3" class="empty">No submissions yet.</td></tr>'
+
+    return HTMLResponse(_render(
+        "form.html",
+        topnav=_topnav("forms", sess, csrf),
+        id=str(form["id"]),
+        name=_h(form["name"]),
+        slug=_h(form["slug"]),
+        public_url=public_url,
+        schema_json=_h(form.get("schema_json") or ""),
+        routing_json=_h(form.get("routing_json") or ""),
+        sub_rows=sub_rows_html,
+        total=str(subs["total"]),
+    ))
+
+
+# ---------- forms (public submission) ----------
+
+def _render_public_form(form: dict) -> str:
+    """Render the public form HTML from its schema. Vanilla; no JS required."""
+    import json as _json
+    schema = _json.loads(form["schema_json"] or "{}")
+    rows = []
+    for f in schema.get("fields", []):
+        label = _h(f.get("label") or f["key"])
+        required = "required" if f.get("required") else ""
+        ftype = f["type"]
+        key = _h(f["key"])
+        if ftype == "textarea":
+            ctrl = f'<textarea name="{key}" {required}></textarea>'
+        elif ftype == "select":
+            opts = "".join(f'<option value="{_h(o)}">{_h(o)}</option>' for o in f.get("options", []))
+            ctrl = f'<select name="{key}" {required}><option value="">— choose —</option>{opts}</select>'
+        elif ftype == "checkbox":
+            ctrl = f'<input type="checkbox" name="{key}" value="1">'
+        else:
+            html_type = {"email": "email", "tel": "tel", "url": "url", "number": "number"}.get(ftype, "text")
+            ctrl = f'<input type="{html_type}" name="{key}" {required}>'
+        rows.append(f'<div class="row"><label>{label}</label>{ctrl}</div>')
+    fields_html = "\n".join(rows)
+
+    return (
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + _h(form["name"]) + '</title>'
+        '<link rel="stylesheet" href="/static/styles.css">'
+        '</head><body><div class="login-shell">'
+        '<div class="login-card" style="max-width: 480px">'
+        '<div class="brand">' + _h(form["name"]) + '</div>'
+        + (f'<p class="muted" style="font-size:12px">{_h(form.get("description") or "")}</p>' if form.get("description") else '')
+        + f'<form method="post" action="/f/{form["slug"]}">'
+        + fields_html
+        + '<div class="row"><label></label><button class="btn" type="submit">Submit</button></div>'
+        '</form></div></div></body></html>'
+    )
+
+
+@app.get("/f/{slug}", response_class=HTMLResponse)
+def public_form_render(slug: str):
+    form = forms_service.get_by_slug_public(slug)
+    if not form:
+        return HTMLResponse(
+            '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:32px">'
+            '<h1>Form not found</h1></body></html>',
+            status_code=404,
+        )
+    return HTMLResponse(_render_public_form(form))
+
+
+# ---------- global search + duplicates UI ----------
+
+@app.get("/search", response_class=HTMLResponse)
+def search_page(request: Request, q: str = "", kind: str = ""):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
+    result = {"items": [], "buckets": {}, "total": 0, "query": q}
+    if q.strip():
+        kinds_list = [kind] if kind else None
+        result = search_service.search(ctx, q, kinds=kinds_list, limit=100)
+
+    bucket_html_parts = []
+    bucket_order = [("contact", "Contacts"), ("company", "Companies"),
+                    ("interaction", "Interactions"), ("note", "Notes")]
+    for key, label in bucket_order:
+        hits = result["buckets"].get(key, []) if isinstance(result.get("buckets"), dict) else []
+        if not hits:
+            continue
+        rows = "".join(
+            f'<tr><td><a href="{h["url"]}">{h["label"]}</a></td>'
+            f'<td class="muted" style="font-size:11.5px">{h.get("title") or ""}</td>'
+            f'<td class="muted" style="font-size:11.5px">{h.get("body") or ""}</td></tr>'
+            for h in hits
+        )
+        bucket_html_parts.append(
+            f'<div class="card"><h2>{label} <span class="muted">— {len(hits)}</span></h2>'
+            f'<table><tbody>{rows}</tbody></table></div>'
+        )
+    buckets_html = "\n".join(bucket_html_parts) or (
+        '<div class="empty" style="padding:30px">'
+        + (f'No matches for <code>{_h(q)}</code>.' if q.strip() else 'Type a query above to search.')
+        + '</div>'
+    )
+
+    return HTMLResponse(_render(
+        "search.html",
+        topnav=_topnav("", sess, csrf),
+        q=_h(q),
+        total=str(result["total"]),
+        buckets=buckets_html,
+    ))
+
+
+# ---------- duplicates UI ----------
+
+@app.get("/duplicates", response_class=HTMLResponse)
+def duplicates_page(request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
+    scan = duplicates_service.find(ctx, max_groups=100)
+
+    group_html_parts = []
+    for g in scan["groups"]:
+        rows = "".join(
+            f'<tr><td><input type="checkbox" name="ids" value="{c["id"]}"></td>'
+            f'<td><a href="/contacts/{c["id"]}">{_h(c.get("full_name") or c.get("email") or f"#{c[chr(39)+chr(105)+chr(100)+chr(39)]}")}</a>{" <span class=&#34;faint&#34;>(deleted)</span>" if c.get("deleted_at") else ""}</td>'
+            f'<td class="mono">{_h(c.get("email") or "")}</td>'
+            f'<td class="mono">{_h(c.get("phone") or "")}</td></tr>'
+            for c in g["contacts"]
+        )
+        group_html_parts.append(
+            f'<div class="card">'
+            f'  <h2>{_h(g["strategy"])}  <span class="muted">— {_h(str(g["key"]))[:80]}</span></h2>'
+            f'  <form method="post" action="/duplicates/merge">'
+            f'    <input type="hidden" name="csrf" value="{csrf}">'
+            f'    <table><thead><tr><th></th><th>Contact</th><th>Email</th><th>Phone</th></tr></thead>'
+            f'    <tbody>{rows}</tbody></table>'
+            f'    <p class="muted" style="font-size:11.5px; margin-top:10px">'
+            f'      Pick the one to <strong>keep</strong>, check the others to merge into it. '
+            f'      Merging re-parents all interactions, notes, tags, deals, and tasks; '
+            f'      merged contacts are soft-deleted and their emails freed.'
+            f'    </p>'
+            f'    <div class="actions"><button class="btn" type="submit">Merge selected</button></div>'
+            f'  </form>'
+            f'</div>'
+        )
+    groups_html = "\n".join(group_html_parts) or (
+        '<div class="empty" style="padding:30px">No duplicate groups detected.</div>'
+    )
+
+    return HTMLResponse(_render(
+        "duplicates.html",
+        topnav=_topnav("", sess, csrf),
+        total=str(scan["total_groups"]),
+        groups=groups_html,
+    ))
+
+
+@app.post("/duplicates/merge")
+async def duplicates_merge_form(
+    request: Request,
+    ids: list[int] = Form([]),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    if len(ids) < 2:
+        return RedirectResponse("/duplicates?error=Select+2+or+more+contacts+to+merge", status_code=303)
+    # convention: first picked is "keep", rest are merged in
+    keep_id = ids[0]
+    merge_ids = ids[1:]
+    try:
+        duplicates_service.merge(ctx, keep_id=keep_id, merge_ids=merge_ids)
+    except ServiceError as e:
+        return RedirectResponse(f"/duplicates?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/duplicates", status_code=303)
+
+
+@app.post("/f/{slug}")
+async def public_form_submit(slug: str, request: Request):
+    """Public submission. Accepts form-encoded or JSON. No auth, no CSRF.
+
+    The CRM is single-tenant and the form's schema-driven validator drops any
+    unknown keys, so an attacker can't inject arbitrary columns. Privacy gate
+    is at the form level: setting `active=0` disables a slug entirely.
+    """
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("application/json"):
+        payload = await request.json()
+    else:
+        form_data = await request.form()
+        payload = {k: v for k, v in form_data.items()}
+
+    ip = request.client.host if request.client else None
+    ua = request.headers.get("user-agent")
+    try:
+        result = forms_service.submit_public(slug, payload, ip=ip, user_agent=ua)
+    except ServiceError as e:
+        if content_type.startswith("application/json"):
+            return JSONResponse(status_code=400, content={"ok": False, "error": {
+                "code": e.code, "message": e.message, "details": e.details,
+            }})
+        return HTMLResponse(
+            '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:32px">'
+            f'<h1>{_h(e.message)}</h1>'
+            f'<p><a href="/f/{slug}">Back to form</a></p></body></html>',
+            status_code=400,
+        )
+
+    if content_type.startswith("application/json"):
+        return {"ok": True, **result}
+    # form-encoded submitters get a thank-you (or redirect if configured)
+    if result.get("redirect_url"):
+        return RedirectResponse(result["redirect_url"], status_code=303)
+    return HTMLResponse(
+        '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:32px;'
+        'background:#1a1a1a;color:#e6e6e6">'
+        '<div style="max-width:480px;margin:60px auto;background:#fff;color:#1a1a1a;'
+        'border:1px solid #cccccc;padding:32px;text-align:center">'
+        f'<h1 style="margin:0 0 12px;font-size:20px">Thanks — we got it.</h1>'
+        f'<p style="color:#666666">We\'ll be in touch.</p></div></body></html>'
+    )
+
+
 
 
 @app.post("/contacts/{contact_id}/edit")

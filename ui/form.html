@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Form · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>{{name}}<span class="muted" style="font-weight:400; margin-left:8px">#{{id}}</span></h1>
+    <span class="meta">{{total}} submissions</span>
+  </div>
+
+  <div class="card">
+    <h2>Public URL</h2>
+    <p style="font-size:13px; margin-top:4px">
+      <a href="{{public_url}}" target="_blank" class="mono">{{public_url}}</a>
+    </p>
+    <p class="muted" style="font-size:12px">
+      Anyone with this URL can submit. Disable by toggling <code>active=false</code>
+      via <code>PUT /api/forms/{{id}}</code> (UI toggle coming).
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Schema</h2>
+    <pre>{{schema_json}}</pre>
+  </div>
+
+  <div class="card">
+    <h2>Routing rules</h2>
+    <pre>{{routing_json}}</pre>
+  </div>
+
+  <div class="card">
+    <h2>Submissions</h2>
+    <table>
+      <thead><tr><th>created_at</th><th>Contact</th><th>Payload</th></tr></thead>
+      <tbody>{{sub_rows}}</tbody>
+    </table>
+  </div>
+
+</main>
+</body>
+</html>

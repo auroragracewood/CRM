@@ -31,6 +31,9 @@ from backend.services import (  # noqa: E402
     notes as notes_service,
     tags as tags_service,
     consent as consent_service,
+    pipelines as pipelines_service,
+    deals as deals_service,
+    tasks as tasks_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
 
@@ -294,6 +297,163 @@ try:
         except ServiceError as e:
             return _err(e)
 
+    # ---------- v1: pipelines, deals, tasks ----------
+
+    @mcp.tool()
+    def create_pipeline_from_template(name: str, template: str) -> dict:
+        """Create a pipeline + its stages from a built-in template.
+        templates: sales, client, sponsor."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "pipeline": pipelines_service.create_from_template(ctx, name, template)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_pipelines(include_archived: bool = False) -> dict:
+        """List pipelines (with stages embedded)."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "items": pipelines_service.list_pipelines(ctx, include_archived=include_archived)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def get_pipeline(pipeline_id: int) -> dict:
+        """Fetch a pipeline with its stages."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "pipeline": pipelines_service.get_pipeline(ctx, pipeline_id)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def create_deal(title: str, pipeline_id: int, stage_id: int,
+                    contact_id: int = None, company_id: int = None,
+                    value_cents: int = None, currency: str = "",
+                    probability: int = None, expected_close: int = None) -> dict:
+        """Create a deal on a pipeline + stage."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        payload = {k: v for k, v in {
+            "title": title, "pipeline_id": pipeline_id, "stage_id": stage_id,
+            "contact_id": contact_id, "company_id": company_id,
+            "value_cents": value_cents, "currency": currency or None,
+            "probability": probability, "expected_close": expected_close,
+        }.items() if v is not None and v != ""}
+        try:
+            return {"ok": True, "deal": deals_service.create(ctx, payload)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def update_deal(deal_id: int, stage_id: int = None, status: str = "",
+                    value_cents: int = None, probability: int = None,
+                    next_step: str = "") -> dict:
+        """Update a deal's stage, status, value, probability, or next step."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        payload = {k: v for k, v in {
+            "stage_id": stage_id, "status": status or None,
+            "value_cents": value_cents, "probability": probability,
+            "next_step": next_step or None,
+        }.items() if v is not None and v != ""}
+        if not payload:
+            return {"ok": False, "error": {"code": "VALIDATION_ERROR",
+                                           "message": "no fields to update", "details": {}}}
+        try:
+            return {"ok": True, "deal": deals_service.update(ctx, deal_id, payload)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_deals(pipeline_id: int = None, stage_id: int = None,
+                   status: str = "", assigned_to: int = None,
+                   contact_id: int = None, company_id: int = None,
+                   limit: int = 100, offset: int = 0) -> dict:
+        """List deals with optional filters."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, **deals_service.list_(
+                ctx, pipeline_id=pipeline_id, stage_id=stage_id,
+                status=status or None, assigned_to=assigned_to,
+                contact_id=contact_id, company_id=company_id,
+                limit=limit, offset=offset,
+            )}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def create_task(title: str,
+                    contact_id: int = None, company_id: int = None, deal_id: int = None,
+                    assigned_to: int = None, due_date: int = None,
+                    priority: str = "normal", description: str = "") -> dict:
+        """Create a task. priority: low, normal, high, urgent. due_date is unix seconds."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        payload = {k: v for k, v in {
+            "title": title, "description": description or None,
+            "contact_id": contact_id, "company_id": company_id, "deal_id": deal_id,
+            "assigned_to": assigned_to, "due_date": due_date,
+            "priority": priority,
+        }.items() if v is not None and v != ""}
+        try:
+            return {"ok": True, "task": tasks_service.create(ctx, payload)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_tasks(status: str = "", assigned_to: int = None,
+                   contact_id: int = None, company_id: int = None, deal_id: int = None,
+                   overdue: bool = False, due_before: int = None,
+                   limit: int = 100, offset: int = 0) -> dict:
+        """List tasks. Useful filters: status, assigned_to, overdue=True, due_before=<unix sec>."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, **tasks_service.list_(
+                ctx, status=status or None, assigned_to=assigned_to,
+                contact_id=contact_id, company_id=company_id, deal_id=deal_id,
+                overdue=overdue, due_before=due_before,
+                limit=limit, offset=offset,
+            )}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def complete_task(task_id: int) -> dict:
+        """Mark a task as done (sets status='done' and completed_at)."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "task": tasks_service.complete(ctx, task_id)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def update_task(task_id: int, status: str = "", priority: str = "",
+                    due_date: int = None, title: str = "", description: str = "",
+                    assigned_to: int = None) -> dict:
+        """Update a task. Pass only the fields you want to change."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        payload = {k: v for k, v in {
+            "status": status or None, "priority": priority or None,
+            "due_date": due_date, "title": title or None,
+            "description": description or None, "assigned_to": assigned_to,
+        }.items() if v is not None and v != ""}
+        if not payload:
+            return {"ok": False, "error": {"code": "VALIDATION_ERROR",
+                                           "message": "no fields to update", "details": {}}}
+        try:
+            return {"ok": True, "task": tasks_service.update(ctx, task_id, payload)}
+        except ServiceError as e:
+            return _err(e)
+
     def main():
         mcp.run()
 
@@ -385,6 +545,58 @@ except ImportError:  # ----- fallback: minimal stdio JSON-RPC server -----
                     ctx, int(params["contact_id"]), params["channel"], params["status"],
                     source=params.get("source"), proof=params.get("proof"),
                 )}
+            # pipelines
+            if method == "create_pipeline_from_template":
+                return {"ok": True, "pipeline": pipelines_service.create_from_template(
+                    ctx, params["name"], params["template"]
+                )}
+            if method == "list_pipelines":
+                return {"ok": True, "items": pipelines_service.list_pipelines(
+                    ctx, include_archived=bool(params.get("include_archived", False))
+                )}
+            if method == "get_pipeline":
+                return {"ok": True, "pipeline": pipelines_service.get_pipeline(
+                    ctx, int(params["pipeline_id"])
+                )}
+            # deals
+            if method == "create_deal":
+                return {"ok": True, "deal": deals_service.create(ctx, params)}
+            if method == "update_deal":
+                did = int(params.pop("deal_id"))
+                return {"ok": True, "deal": deals_service.update(ctx, did, params)}
+            if method == "list_deals":
+                return {"ok": True, **deals_service.list_(
+                    ctx,
+                    pipeline_id=params.get("pipeline_id"),
+                    stage_id=params.get("stage_id"),
+                    status=params.get("status") or None,
+                    assigned_to=params.get("assigned_to"),
+                    contact_id=params.get("contact_id"),
+                    company_id=params.get("company_id"),
+                    limit=int(params.get("limit", 100)),
+                    offset=int(params.get("offset", 0)),
+                )}
+            # tasks
+            if method == "create_task":
+                return {"ok": True, "task": tasks_service.create(ctx, params)}
+            if method == "list_tasks":
+                return {"ok": True, **tasks_service.list_(
+                    ctx,
+                    status=params.get("status") or None,
+                    assigned_to=params.get("assigned_to"),
+                    contact_id=params.get("contact_id"),
+                    company_id=params.get("company_id"),
+                    deal_id=params.get("deal_id"),
+                    overdue=bool(params.get("overdue", False)),
+                    due_before=params.get("due_before"),
+                    limit=int(params.get("limit", 100)),
+                    offset=int(params.get("offset", 0)),
+                )}
+            if method == "complete_task":
+                return {"ok": True, "task": tasks_service.complete(ctx, int(params["task_id"]))}
+            if method == "update_task":
+                tid = int(params.pop("task_id"))
+                return {"ok": True, "task": tasks_service.update(ctx, tid, params)}
             return {"ok": False, "error": {"code": "UNKNOWN_METHOD", "message": method, "details": {}}}
         except ServiceError as e:
             return _err(e)

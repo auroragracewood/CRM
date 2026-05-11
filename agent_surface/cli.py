@@ -33,6 +33,13 @@ from backend.services import (  # noqa: E402
     notes as notes_service,
     tags as tags_service,
     consent as consent_service,
+    pipelines as pipelines_service,
+    deals as deals_service,
+    tasks as tasks_service,
+    forms as forms_service,
+    duplicates as duplicates_service,
+    search as search_service,
+    imports as imports_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
 
@@ -273,6 +280,197 @@ def cmd_consent_list(args):
     _print({"ok": True, "items": out})
 
 
+# ----- pipelines -----
+
+def cmd_pipeline_create(args):
+    out = _handle(args, pipelines_service.create_pipeline, {
+        "name": args.name, "type": args.type, "description": args.description,
+    })
+    _print({"ok": True, "pipeline": out})
+
+
+def cmd_pipeline_from_template(args):
+    out = _handle(args, pipelines_service.create_from_template, args.name, args.template)
+    _print({"ok": True, "pipeline": out})
+
+
+def cmd_pipeline_list(args):
+    out = _handle(args, pipelines_service.list_pipelines, include_archived=args.include_archived)
+    _print({"ok": True, "items": out})
+
+
+def cmd_pipeline_get(args):
+    out = _handle(args, pipelines_service.get_pipeline, args.id)
+    _print({"ok": True, "pipeline": out})
+
+
+def cmd_pipeline_add_stage(args):
+    out = _handle(args, pipelines_service.add_stage, args.pipeline_id, args.name,
+                  position=args.position, is_won=args.is_won, is_lost=args.is_lost)
+    _print({"ok": True, "stage": out})
+
+
+def cmd_pipeline_archive(args):
+    out = _handle(args, pipelines_service.archive_pipeline, args.id)
+    _print({"ok": True, **out})
+
+
+# ----- deals -----
+
+def cmd_deal_create(args):
+    payload = {k: v for k, v in {
+        "title": args.title,
+        "pipeline_id": args.pipeline_id, "stage_id": args.stage_id,
+        "contact_id": args.contact_id, "company_id": args.company_id,
+        "value_cents": args.value_cents, "currency": args.currency,
+        "probability": args.probability, "expected_close": args.expected_close,
+        "status": args.status, "next_step": args.next_step,
+        "assigned_to": args.assigned_to,
+    }.items() if v is not None}
+    out = _handle(args, deals_service.create, payload)
+    _print({"ok": True, "deal": out})
+
+
+def cmd_deal_get(args):
+    out = _handle(args, deals_service.get, args.id)
+    _print({"ok": True, "deal": out})
+
+
+def cmd_deal_list(args):
+    out = _handle(args, deals_service.list_,
+                  pipeline_id=args.pipeline_id, stage_id=args.stage_id,
+                  status=args.status, assigned_to=args.assigned_to,
+                  contact_id=args.contact_id, company_id=args.company_id,
+                  limit=args.limit, offset=args.offset)
+    _print({"ok": True, **out})
+
+
+def cmd_deal_update(args):
+    payload = {k: v for k, v in {
+        "title": args.title, "stage_id": args.stage_id, "status": args.status,
+        "value_cents": args.value_cents, "currency": args.currency,
+        "probability": args.probability, "expected_close": args.expected_close,
+        "next_step": args.next_step, "assigned_to": args.assigned_to, "notes": args.notes,
+    }.items() if v is not None}
+    if not payload:
+        print("ERROR: provide at least one field to update", file=sys.stderr); sys.exit(2)
+    out = _handle(args, deals_service.update, args.id, payload)
+    _print({"ok": True, "deal": out})
+
+
+def cmd_deal_delete(args):
+    out = _handle(args, deals_service.delete, args.id)
+    _print({"ok": True, **out})
+
+
+# ----- tasks -----
+
+def cmd_task_create(args):
+    payload = {k: v for k, v in {
+        "title": args.title, "description": args.description,
+        "contact_id": args.contact_id, "company_id": args.company_id,
+        "deal_id": args.deal_id, "assigned_to": args.assigned_to,
+        "due_date": args.due_date, "priority": args.priority,
+    }.items() if v is not None}
+    out = _handle(args, tasks_service.create, payload)
+    _print({"ok": True, "task": out})
+
+
+def cmd_task_get(args):
+    out = _handle(args, tasks_service.get, args.id)
+    _print({"ok": True, "task": out})
+
+
+def cmd_task_list(args):
+    out = _handle(args, tasks_service.list_,
+                  status=args.status, assigned_to=args.assigned_to,
+                  contact_id=args.contact_id, company_id=args.company_id,
+                  deal_id=args.deal_id, overdue=args.overdue, due_before=args.due_before,
+                  limit=args.limit, offset=args.offset)
+    _print({"ok": True, **out})
+
+
+def cmd_task_update(args):
+    payload = {k: v for k, v in {
+        "title": args.title, "description": args.description,
+        "status": args.status, "priority": args.priority,
+        "due_date": args.due_date, "assigned_to": args.assigned_to,
+    }.items() if v is not None}
+    if not payload:
+        print("ERROR: provide at least one field to update", file=sys.stderr); sys.exit(2)
+    out = _handle(args, tasks_service.update, args.id, payload)
+    _print({"ok": True, "task": out})
+
+
+def cmd_task_complete(args):
+    out = _handle(args, tasks_service.complete, args.id)
+    _print({"ok": True, "task": out})
+
+
+def cmd_task_delete(args):
+    out = _handle(args, tasks_service.delete, args.id)
+    _print({"ok": True, **out})
+
+
+# ----- search -----
+
+def cmd_search(args):
+    out = _handle(args, search_service.search, args.q,
+                  kinds=([k.strip() for k in args.kinds.split(",") if k.strip()] if args.kinds else None),
+                  limit=args.limit)
+    _print({"ok": True, **out})
+
+
+# ----- duplicates -----
+
+def cmd_duplicates_find(args):
+    s_list = [s.strip() for s in args.strategies.split(",") if s.strip()] if args.strategies else None
+    out = _handle(args, duplicates_service.find, strategies=s_list, max_groups=args.max_groups)
+    _print({"ok": True, **out})
+
+
+def cmd_duplicates_merge(args):
+    merge_ids = [int(x) for x in args.merge_ids.split(",") if x.strip()]
+    out = _handle(args, duplicates_service.merge, keep_id=args.keep_id, merge_ids=merge_ids)
+    _print({"ok": True, **out})
+
+
+# ----- imports + exports -----
+
+def cmd_import(args):
+    user_id, role = _resolve_user(args)
+    ctx = _ctx(args, role, user_id)
+    csv_text = Path(args.csv).read_text(encoding="utf-8")
+    fn = imports_service.import_contacts if args.kind == "contacts" else imports_service.import_companies
+    try:
+        out = fn(ctx, csv_text, dry_run=args.dry_run)
+    except ServiceError as e:
+        print(json.dumps({"ok": False, "error": {
+            "code": e.code, "message": e.message
+        }}, indent=2)); sys.exit(1)
+    _print({"ok": True, **out})
+
+
+def cmd_export(args):
+    user_id, role = _resolve_user(args)
+    ctx = _ctx(args, role, user_id)
+    try:
+        out_stream = imports_service.export_csv(ctx, args.kind, include_deleted=args.include_deleted)
+    except ServiceError as e:
+        print(json.dumps({"ok": False, "error": {
+            "code": e.code, "message": e.message
+        }}, indent=2)); sys.exit(1)
+    sink = open(args.out, "w", newline="", encoding="utf-8") if args.out else sys.stdout
+    try:
+        for chunk in out_stream:
+            sink.write(chunk)
+    finally:
+        if args.out:
+            sink.close()
+    if args.out:
+        print(f"Wrote {args.out}", file=sys.stderr)
+
+
 def cmd_backup_create(args):
     src = Path(DB_PATH)
     if not src.exists():
@@ -404,6 +602,138 @@ def build_parser():
     cr.add_argument("--source"); cr.add_argument("--proof")
     cr.set_defaults(func=cmd_consent_record)
     clist = csub2.add_parser("list"); clist.add_argument("--contact-id", dest="contact_id", type=int, required=True); clist.set_defaults(func=cmd_consent_list)
+
+    # pipeline
+    pipeline = sub.add_parser("pipeline", help="Pipeline commands")
+    psub = pipeline.add_subparsers(dest="action", required=True)
+    pc = psub.add_parser("create")
+    pc.add_argument("--name", required=True); pc.add_argument("--type", required=True)
+    pc.add_argument("--description")
+    pc.set_defaults(func=cmd_pipeline_create)
+    pft = psub.add_parser("from-template")
+    pft.add_argument("--name", required=True)
+    pft.add_argument("--template", required=True, choices=list(pipelines_service.TEMPLATES))
+    pft.set_defaults(func=cmd_pipeline_from_template)
+    pl = psub.add_parser("list")
+    pl.add_argument("--include-archived", dest="include_archived", action="store_true")
+    pl.set_defaults(func=cmd_pipeline_list)
+    pg = psub.add_parser("get"); pg.add_argument("--id", type=int, required=True); pg.set_defaults(func=cmd_pipeline_get)
+    pas = psub.add_parser("add-stage")
+    pas.add_argument("--pipeline-id", dest="pipeline_id", type=int, required=True)
+    pas.add_argument("--name", required=True)
+    pas.add_argument("--position", type=int)
+    pas.add_argument("--is-won", dest="is_won", action="store_true")
+    pas.add_argument("--is-lost", dest="is_lost", action="store_true")
+    pas.set_defaults(func=cmd_pipeline_add_stage)
+    pa = psub.add_parser("archive"); pa.add_argument("--id", type=int, required=True); pa.set_defaults(func=cmd_pipeline_archive)
+
+    # deal
+    deal = sub.add_parser("deal", help="Deal commands")
+    dsub = deal.add_subparsers(dest="action", required=True)
+    dc = dsub.add_parser("create")
+    dc.add_argument("--title", required=True)
+    dc.add_argument("--pipeline-id", dest="pipeline_id", type=int, required=True)
+    dc.add_argument("--stage-id", dest="stage_id", type=int, required=True)
+    dc.add_argument("--contact-id", dest="contact_id", type=int)
+    dc.add_argument("--company-id", dest="company_id", type=int)
+    dc.add_argument("--value-cents", dest="value_cents", type=int)
+    dc.add_argument("--currency"); dc.add_argument("--probability", type=int)
+    dc.add_argument("--expected-close", dest="expected_close", type=int)
+    dc.add_argument("--status", choices=["open","won","lost","nurture"])
+    dc.add_argument("--next-step", dest="next_step")
+    dc.add_argument("--assigned-to", dest="assigned_to", type=int)
+    dc.set_defaults(func=cmd_deal_create)
+    dg = dsub.add_parser("get"); dg.add_argument("--id", type=int, required=True); dg.set_defaults(func=cmd_deal_get)
+    dl = dsub.add_parser("list")
+    dl.add_argument("--pipeline-id", dest="pipeline_id", type=int)
+    dl.add_argument("--stage-id", dest="stage_id", type=int)
+    dl.add_argument("--status", choices=["open","won","lost","nurture"])
+    dl.add_argument("--assigned-to", dest="assigned_to", type=int)
+    dl.add_argument("--contact-id", dest="contact_id", type=int)
+    dl.add_argument("--company-id", dest="company_id", type=int)
+    dl.add_argument("--limit", type=int, default=100); dl.add_argument("--offset", type=int, default=0)
+    dl.set_defaults(func=cmd_deal_list)
+    du = dsub.add_parser("update")
+    du.add_argument("--id", type=int, required=True)
+    du.add_argument("--title"); du.add_argument("--stage-id", dest="stage_id", type=int)
+    du.add_argument("--status", choices=["open","won","lost","nurture"])
+    du.add_argument("--value-cents", dest="value_cents", type=int)
+    du.add_argument("--currency"); du.add_argument("--probability", type=int)
+    du.add_argument("--expected-close", dest="expected_close", type=int)
+    du.add_argument("--next-step", dest="next_step")
+    du.add_argument("--assigned-to", dest="assigned_to", type=int)
+    du.add_argument("--notes")
+    du.set_defaults(func=cmd_deal_update)
+    dd = dsub.add_parser("delete"); dd.add_argument("--id", type=int, required=True); dd.set_defaults(func=cmd_deal_delete)
+
+    # task
+    task = sub.add_parser("task", help="Task commands")
+    tasub = task.add_subparsers(dest="action", required=True)
+    tc = tasub.add_parser("create")
+    tc.add_argument("--title", required=True); tc.add_argument("--description")
+    tc.add_argument("--contact-id", dest="contact_id", type=int)
+    tc.add_argument("--company-id", dest="company_id", type=int)
+    tc.add_argument("--deal-id", dest="deal_id", type=int)
+    tc.add_argument("--assigned-to", dest="assigned_to", type=int)
+    tc.add_argument("--due-date", dest="due_date", type=int, help="unix seconds")
+    tc.add_argument("--priority", choices=["low","normal","high","urgent"])
+    tc.set_defaults(func=cmd_task_create)
+    tg = tasub.add_parser("get"); tg.add_argument("--id", type=int, required=True); tg.set_defaults(func=cmd_task_get)
+    tl = tasub.add_parser("list")
+    tl.add_argument("--status", choices=["open","in_progress","done","cancelled"])
+    tl.add_argument("--assigned-to", dest="assigned_to", type=int)
+    tl.add_argument("--contact-id", dest="contact_id", type=int)
+    tl.add_argument("--company-id", dest="company_id", type=int)
+    tl.add_argument("--deal-id", dest="deal_id", type=int)
+    tl.add_argument("--overdue", action="store_true")
+    tl.add_argument("--due-before", dest="due_before", type=int)
+    tl.add_argument("--limit", type=int, default=100); tl.add_argument("--offset", type=int, default=0)
+    tl.set_defaults(func=cmd_task_list)
+    tu = tasub.add_parser("update")
+    tu.add_argument("--id", type=int, required=True)
+    tu.add_argument("--title"); tu.add_argument("--description")
+    tu.add_argument("--status", choices=["open","in_progress","done","cancelled"])
+    tu.add_argument("--priority", choices=["low","normal","high","urgent"])
+    tu.add_argument("--due-date", dest="due_date", type=int)
+    tu.add_argument("--assigned-to", dest="assigned_to", type=int)
+    tu.set_defaults(func=cmd_task_update)
+    tdone = tasub.add_parser("complete"); tdone.add_argument("--id", type=int, required=True); tdone.set_defaults(func=cmd_task_complete)
+    tdel = tasub.add_parser("delete"); tdel.add_argument("--id", type=int, required=True); tdel.set_defaults(func=cmd_task_delete)
+
+    # search
+    se = sub.add_parser("search", help="Global search (FTS5)")
+    se.add_argument("--q", required=True, help="search query")
+    se.add_argument("--kinds", default="", help="comma-separated: contact,company,interaction,note")
+    se.add_argument("--limit", type=int, default=50)
+    se.set_defaults(func=cmd_search)
+
+    # duplicates
+    dup = sub.add_parser("duplicates", help="Duplicate detection + merge")
+    dsub2 = dup.add_subparsers(dest="action", required=True)
+    df = dsub2.add_parser("find")
+    df.add_argument("--strategies", default="", help="comma-separated: email,phone,name,name_company")
+    df.add_argument("--max-groups", dest="max_groups", type=int, default=200)
+    df.set_defaults(func=cmd_duplicates_find)
+    dm = dsub2.add_parser("merge")
+    dm.add_argument("--keep-id", dest="keep_id", type=int, required=True)
+    dm.add_argument("--merge-ids", dest="merge_ids", required=True,
+                    help="comma-separated contact ids to merge INTO keep-id")
+    dm.set_defaults(func=cmd_duplicates_merge)
+
+    # import
+    imp = sub.add_parser("import", help="Bulk import from CSV")
+    imp.add_argument("--kind", required=True, choices=["contacts", "companies"])
+    imp.add_argument("--csv", required=True, help="path to CSV file")
+    imp.add_argument("--dry-run", dest="dry_run", action="store_true")
+    imp.set_defaults(func=cmd_import)
+
+    # export
+    exp = sub.add_parser("export", help="Bulk export to CSV")
+    exp.add_argument("--kind", required=True,
+                     choices=["contacts","companies","deals","tasks","interactions"])
+    exp.add_argument("--out", help="optional output path; stdout if omitted")
+    exp.add_argument("--include-deleted", dest="include_deleted", action="store_true")
+    exp.set_defaults(func=cmd_export)
 
     # backup
     backup = sub.add_parser("backup", help="Backup commands")

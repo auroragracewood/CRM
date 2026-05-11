@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Duplicates · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Duplicate contacts</h1>
+    <span class="meta">{{total}} group(s) detected</span>
+  </div>
+
+  <p class="muted" style="font-size:12px">
+    Each group lists contacts the system thinks might be the same person.
+    Check 2 or more — the first one you check is kept; the rest are merged
+    into it. Interactions, notes, tags, deals, tasks all move; emails free up.
+  </p>
+
+  {{groups}}
+
+</main>
+</body>
+</html>

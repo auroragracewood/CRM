@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pipelines · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content content-wide">
+
+  <div class="pagebar">
+    <h1>Pipelines</h1>
+    <form method="post" action="/pipelines/new" class="inline-form" style="grid-template-columns: 1fr 140px auto; margin-bottom: 0; padding: 8px 12px">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <div><label>Name</label><input name="name" placeholder="2026 Sales" required></div>
+      <div><label>Template</label>
+        <select name="template">
+          <option value="sales">sales</option>
+          <option value="client">client project</option>
+          <option value="sponsor">sponsor</option>
+        </select>
+      </div>
+      <button class="btn" type="submit">Create pipeline</button>
+    </form>
+  </div>
+
+  <div class="pipeline-strip">{{selector}}</div>
+
+  {{kanban}}
+
+</main>
+</body>
+</html>

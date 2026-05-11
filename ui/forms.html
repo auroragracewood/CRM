@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Forms · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Forms</h1>
+    <span class="meta">public lead capture surfaces</span>
+  </div>
+
+  {{created_block}}
+
+  <div class="card">
+    <h2>Create a simple contact form</h2>
+    <p class="muted" style="font-size:12px; margin-top:0">
+      Generates a public URL with fields: name, email, interest (select), message.
+      Submissions auto-create or match the contact by email and apply
+      <code>lead</code> + <code>form:&lt;slug&gt;</code> + <code>interest:&lt;value&gt;</code> tags.
+      Power users: post a full schema to <code>POST /api/forms</code>.
+    </p>
+    <form class="inline-form" method="post" action="/forms/new"
+          style="grid-template-columns: 180px 1fr 2fr auto">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <div><label>Slug (URL)</label><input name="slug" placeholder="contact-us" required pattern="[a-z0-9][a-z0-9_-]+"></div>
+      <div><label>Name</label><input name="name" placeholder="Contact Us" required></div>
+      <div><label>Description</label><input name="description" placeholder="optional"></div>
+      <button class="btn" type="submit">Create form</button>
+    </form>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Public URL</th><th>Status</th><th>Created</th></tr>
+    </thead>
+    <tbody>
+      {{rows}}
+    </tbody>
+  </table>
+
+</main>
+</body>
+</html>

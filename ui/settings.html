@@ -47,6 +47,22 @@
   </div>
 
   <div class="card">
+    <h2>Import / Export</h2>
+    <p class="muted" style="font-size:12px; margin-top:0">
+      <strong>Import</strong> via the CLI (file-upload over REST is intentionally not in v0):
+      <code>python -m agent_surface.cli import --kind contacts --csv /path/contacts.csv [--dry-run]</code><br>
+      <strong>Export</strong> streams CSV — click a button below to download (uses your session cookie, no extra auth):
+    </p>
+    <div class="actions" style="flex-wrap: wrap">
+      <a class="btn secondary" href="/api/export/contacts.csv">Contacts</a>
+      <a class="btn secondary" href="/api/export/companies.csv">Companies</a>
+      <a class="btn secondary" href="/api/export/deals.csv">Deals</a>
+      <a class="btn secondary" href="/api/export/tasks.csv">Tasks</a>
+      <a class="btn secondary" href="/api/export/interactions.csv">Interactions</a>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Webhooks</h2>
     <p class="muted" style="font-size:12px; margin-top:0">
       Outbound subscriptions. Events fire via the outbox pattern: enqueued in the same

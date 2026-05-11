@@ -29,6 +29,13 @@ from .services import (
     notes as notes_service,
     tags as tags_service,
     consent as consent_service,
+    pipelines as pipelines_service,
+    deals as deals_service,
+    tasks as tasks_service,
+    forms as forms_service,
+    duplicates as duplicates_service,
+    search as search_service,
+    imports as imports_service,
 )
 from .services.contacts import ServiceError
 
@@ -45,6 +52,12 @@ _STATUS = {
     "NOTE_NOT_FOUND": 404,
     "TAG_EXISTS": 409,
     "API_KEY_NOT_FOUND": 404,
+    "PIPELINE_NOT_FOUND": 404,
+    "DEAL_NOT_FOUND": 404,
+    "TASK_NOT_FOUND": 404,
+    "USER_NOT_FOUND": 404,
+    "FORM_NOT_FOUND": 404,
+    "FORM_SLUG_EXISTS": 409,
 }
 
 
@@ -374,3 +387,339 @@ async def api_list_consent(contact_id: int, request: Request):
     except ServiceError as e:
         return _error(e, ctx.request_id)
     return {"ok": True, "items": items, "request_id": ctx.request_id}
+
+
+# ----- Pipelines + stages (v1) -----
+
+@router.post("/pipelines")
+async def api_create_pipeline(request: Request):
+    ctx = build_context(request)
+    payload = await request.json()
+    stages = payload.pop("stages", None)
+    try:
+        p = pipelines_service.create_pipeline(ctx, payload, stages=stages)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "pipeline": p, "request_id": ctx.request_id})
+
+
+@router.post("/pipelines/from-template")
+async def api_pipeline_from_template(request: Request):
+    ctx = build_context(request)
+    p = await request.json()
+    try:
+        pl = pipelines_service.create_from_template(ctx, p["name"], p["template"])
+    except (KeyError, ValueError) as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": {
+            "code": "VALIDATION_ERROR", "message": str(e), "details": {}, "request_id": ctx.request_id,
+        }})
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "pipeline": pl, "request_id": ctx.request_id})
+
+
+@router.get("/pipelines")
+async def api_list_pipelines(request: Request, include_archived: bool = False):
+    ctx = build_context(request)
+    try:
+        items = pipelines_service.list_pipelines(ctx, include_archived=include_archived)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "items": items, "request_id": ctx.request_id}
+
+
+@router.get("/pipelines/{pipeline_id}")
+async def api_get_pipeline(pipeline_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        p = pipelines_service.get_pipeline(ctx, pipeline_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "pipeline": p, "request_id": ctx.request_id}
+
+
+@router.post("/pipelines/{pipeline_id}/stages")
+async def api_add_stage(pipeline_id: int, request: Request):
+    ctx = build_context(request)
+    p = await request.json()
+    try:
+        s = pipelines_service.add_stage(
+            ctx, pipeline_id, p["name"],
+            position=p.get("position"),
+            is_won=bool(p.get("is_won")), is_lost=bool(p.get("is_lost")),
+        )
+    except (KeyError,) as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": {
+            "code": "VALIDATION_ERROR", "message": f"missing field: {e}", "details": {}, "request_id": ctx.request_id,
+        }})
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "stage": s, "request_id": ctx.request_id})
+
+
+@router.post("/pipelines/{pipeline_id}/archive")
+async def api_archive_pipeline(pipeline_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        out = pipelines_service.archive_pipeline(ctx, pipeline_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+# ----- Deals (v1) -----
+
+@router.post("/deals")
+async def api_create_deal(request: Request):
+    ctx = build_context(request)
+    payload = await request.json()
+    try:
+        d = deals_service.create(ctx, payload)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "deal": d, "request_id": ctx.request_id})
+
+
+@router.get("/deals")
+async def api_list_deals(
+    request: Request,
+    pipeline_id: int = None, stage_id: int = None,
+    status: str = None, assigned_to: int = None,
+    contact_id: int = None, company_id: int = None,
+    limit: int = 100, offset: int = 0,
+):
+    ctx = build_context(request)
+    try:
+        result = deals_service.list_(
+            ctx, pipeline_id=pipeline_id, stage_id=stage_id,
+            status=status, assigned_to=assigned_to,
+            contact_id=contact_id, company_id=company_id,
+            limit=limit, offset=offset,
+        )
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+@router.get("/deals/{deal_id}")
+async def api_get_deal(deal_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        d = deals_service.get(ctx, deal_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "deal": d, "request_id": ctx.request_id}
+
+
+@router.put("/deals/{deal_id}")
+async def api_update_deal(deal_id: int, request: Request):
+    ctx = build_context(request)
+    payload = await request.json()
+    try:
+        d = deals_service.update(ctx, deal_id, payload)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "deal": d, "request_id": ctx.request_id}
+
+
+@router.delete("/deals/{deal_id}")
+async def api_delete_deal(deal_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        out = deals_service.delete(ctx, deal_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+# ----- Tasks (v1) -----
+
+@router.post("/tasks")
+async def api_create_task(request: Request):
+    ctx = build_context(request)
+    payload = await request.json()
+    try:
+        t = tasks_service.create(ctx, payload)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "task": t, "request_id": ctx.request_id})
+
+
+@router.get("/tasks")
+async def api_list_tasks(
+    request: Request,
+    status: str = None, assigned_to: int = None,
+    contact_id: int = None, company_id: int = None, deal_id: int = None,
+    overdue: bool = False, due_before: int = None,
+    limit: int = 100, offset: int = 0,
+):
+    ctx = build_context(request)
+    try:
+        result = tasks_service.list_(
+            ctx, status=status, assigned_to=assigned_to,
+            contact_id=contact_id, company_id=company_id, deal_id=deal_id,
+            overdue=overdue, due_before=due_before,
+            limit=limit, offset=offset,
+        )
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+@router.get("/tasks/{task_id}")
+async def api_get_task(task_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        t = tasks_service.get(ctx, task_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "task": t, "request_id": ctx.request_id}
+
+
+@router.put("/tasks/{task_id}")
+async def api_update_task(task_id: int, request: Request):
+    ctx = build_context(request)
+    payload = await request.json()
+    try:
+        t = tasks_service.update(ctx, task_id, payload)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "task": t, "request_id": ctx.request_id}
+
+
+@router.post("/tasks/{task_id}/complete")
+async def api_complete_task(task_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        t = tasks_service.complete(ctx, task_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "task": t, "request_id": ctx.request_id}
+
+
+@router.delete("/tasks/{task_id}")
+async def api_delete_task(task_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        out = tasks_service.delete(ctx, task_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+# ----- Forms (v1) — admin endpoints. Public submission lives in main.py at /f/{slug} -----
+
+@router.post("/forms")
+async def api_create_form(request: Request):
+    ctx = build_context(request)
+    payload = await request.json()
+    try:
+        form = forms_service.create(ctx, payload)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "form": form, "request_id": ctx.request_id})
+
+
+@router.get("/forms")
+async def api_list_forms(request: Request, include_inactive: bool = False):
+    ctx = build_context(request)
+    try:
+        items = forms_service.list_(ctx, include_inactive=include_inactive)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "items": items, "request_id": ctx.request_id}
+
+
+@router.get("/forms/{form_id}")
+async def api_get_form(form_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        form = forms_service.get(ctx, form_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "form": form, "request_id": ctx.request_id}
+
+
+@router.put("/forms/{form_id}")
+async def api_update_form(form_id: int, request: Request):
+    ctx = build_context(request)
+    payload = await request.json()
+    try:
+        form = forms_service.update(ctx, form_id, payload)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "form": form, "request_id": ctx.request_id}
+
+
+@router.get("/forms/{form_id}/submissions")
+async def api_form_submissions(form_id: int, request: Request,
+                                limit: int = 100, offset: int = 0):
+    ctx = build_context(request)
+    try:
+        result = forms_service.list_submissions(ctx, form_id, limit=limit, offset=offset)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+# ----- Global search (v1, FTS5-backed) -----
+
+@router.get("/search")
+async def api_search(request: Request, q: str = "", kinds: str = "", limit: int = 50):
+    ctx = build_context(request)
+    kinds_list = [k.strip() for k in kinds.split(",") if k.strip()] if kinds else None
+    try:
+        result = search_service.search(ctx, q, kinds=kinds_list, limit=limit)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+# ----- Duplicates (v1) -----
+
+@router.get("/duplicates")
+async def api_duplicates_scan(request: Request, strategies: str = "",
+                               max_groups: int = 200):
+    ctx = build_context(request)
+    s_list = [s.strip() for s in strategies.split(",") if s.strip()] if strategies else None
+    try:
+        result = duplicates_service.find(ctx, strategies=s_list, max_groups=max_groups)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+# ----- Export (streaming CSV) -----
+
+@router.get("/export/{kind}.csv")
+def api_export_csv(kind: str, request: Request, include_deleted: bool = False):
+    from fastapi.responses import StreamingResponse
+    ctx = build_context(request)
+    try:
+        stream = imports_service.export_csv(ctx, kind, include_deleted=include_deleted)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return StreamingResponse(
+        stream,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{kind}.csv"'},
+    )
+
+
+@router.post("/duplicates/merge")
+async def api_duplicates_merge(request: Request):
+    ctx = build_context(request)
+    p = await request.json()
+    try:
+        result = duplicates_service.merge(
+            ctx, keep_id=int(p["keep_id"]),
+            merge_ids=[int(x) for x in p["merge_ids"]],
+        )
+    except (KeyError, ValueError, TypeError) as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": {
+            "code": "VALIDATION_ERROR", "message": str(e),
+            "details": {}, "request_id": ctx.request_id,
+        }})
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
