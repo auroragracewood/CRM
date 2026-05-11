@@ -35,3 +35,6 @@ venv/
 # Backups
 backups/
 *.backup
+
+# Private project artifacts (not part of the open-source CRM)
+prompt.md

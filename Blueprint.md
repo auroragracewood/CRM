@@ -2,11 +2,28 @@
 
 > An open-source, self-hostable CRM that ships as a complete tool surface for agent-driven workflows.
 
-This is an open-source CRM. Generic. Single-company. Self-hosted. Designed so an AI agent harness (Claude Code, OpenClaw, Codex, Hermes, or anything else) can pull every lever the human UI exposes — and more.
+This is an open-source CRM. Generic. Single-company. Self-hosted. Designed so an AI agent harness (Claude Code, OpenClaw, Codex, or anything else) can pull every lever the human UI exposes — and more.
 
 The CRM is the body. The agent is the brain. The body has nerve endings — API, MCP, CLI, webhooks, cron, skills, plug-ins, prompts, connectors, scripts, markdown. Whatever harness you wire in pulls the levers. The CRM ships **no LLM, no provider keys, no prompt logic**. It exposes operations; any agent operates them.
 
-> Note: this folder (`D:\Great_Creations\GCRM\`) is where the generic CRM is being built. Once it's solid, a private fork becomes **GCRM** — Great Creations' internal instance with multi-subsidiary plumbing wired in to aurora-gracewood.com and greatcreations.art. **The public/open-source repo is "CRM."** GCRM is private, referenced only in legal/privacy fine print.
+> Note: this folder is where the generic CRM is being built. Once it's solid, a private fork becomes **GCRM** — Great Creations' internal instance with multi-subsidiary plumbing wired in to aurora-gracewood.com and greatcreations.art. **The public/open-source repo is "CRM."** GCRM is private, referenced only in legal/privacy fine print.
+
+---
+
+## Status (v4.1 — 2026-05-11)
+
+This Blueprint was written as the planning document at v0. Most of what it describes as future ("v1", "v2", "v3+") is now shipped. Read it as a design rationale, not a roadmap. The current state of the codebase is:
+
+- **v0 (shipped)** — contacts, companies, interactions, notes, tags, consent, audit, webhooks, all four surfaces (REST/CLI/MCP/UI)
+- **v1 (shipped)** — pipelines + deals, forms, tasks, FTS5 search, bulk import/export, duplicate detection
+- **v2 (shipped)** — rule-based scoring (5 score types with evidence trails), segments (static + dynamic), reports catalog
+- **v3 (shipped)** — portal tokens (`/portal/{token}` self-service URLs), inbound endpoints (`/in/{slug}` HMAC-signed), connector UI
+- **v4 (shipped)** — plug-in framework with hook dispatch, saved views, RBAC scaffolding
+- **v4.1 (shipped)** — richer contact model (birthday, pronouns, language, socials, about, interests, source, referrer, preferences), demo seed script, expanded report widgets, first AI plug-in (auto-tag-from-interactions)
+
+**31 application tables** across 7 migration files. ~95 REST endpoints, 60+ CLI actions, ~40 MCP tools. Full operational documentation in `docs/` (the wiki) + `AGENTS.md` + `SCHEMATICS.md`.
+
+When the text below tags something `(v1)` or `(v0)` or describes a feature as "deferred", that's historical. Section 9 below describes the build phases as planned; refer to the wiki and `README.md` for what actually exists.
 
 ---
 
@@ -36,15 +53,20 @@ The bullets below describe the *target* product across all versions. Section 9 s
 
 - Track **contacts** (people) and **companies** (organizations they work for)
 - Log every **interaction** (email, call, meeting, form submission, page view, note-system, system) into one timeline
-- Capture **leads** through forms (public POST endpoints)  *(v1)*
-- Move opportunities through **pipelines** with customizable stages and **deals**  *(v1)*
-- Assign **tasks** to users — owners, due dates, completion  *(v1)*
+- Capture **leads** through forms (public POST endpoints at `/f/{slug}`)
+- Move opportunities through **pipelines** with customizable stages and **deals**
+- Assign **tasks** to users — owners, due dates, completion
 - **Tag** anything with anything
-- Track **consent** per channel per contact  *(v0 table + recording; v1 enforcement)*
+- Track **consent** per channel per contact
 - Fire **webhooks** via an outbox pattern (see §6)
-- Run **cron** jobs (digests, reports, cleanup, integrations)  *(v1)*
-- **Audit** every mutation with before/after  *(v0)*
-- **Search** by name/email indexed at v0; FTS5 across timelines/notes at v1
+- Run **cron** jobs (digests, reports, cleanup, integrations)
+- **Audit** every mutation with before/after JSON
+- **Search** via FTS5 across contacts, companies, interactions, and non-private notes
+- **Score** contacts on 5 dimensions with evidence trails
+- Build **segments** (static + dynamic JSON rule trees)
+- Issue **portal tokens** for external contacts to see their own data
+- Receive **inbound** events from external systems at `/in/{slug}` with HMAC signing
+- **Plug-ins** drop-in to react to events and contribute to fit scoring
 
 ---
 
@@ -52,10 +74,11 @@ The bullets below describe the *target* product across all versions. Section 9 s
 
 - **No multi-tenant / SaaS layer** — each install is one company. Simpler schema, faster ship.
 - **No parent/subsidiary model in core** — too specific to be a generic feature. GCRM's fork adds it; CRM doesn't ship it.
-- **No LLM features in core** — that's the agent harness's job. We provide levers; they decide what to pull.
-- **No relationship graph viz at v0** — additive once interaction data is rich enough to mine.
-- **No portals (client/sponsor/applicant) at v0** — admin-only surface first.
-- **No advanced segmentation / offer engine at v0** — tags + filters cover 90% of use cases.
+- **No LLM features in core** — that's the agent harness's job (or a plug-in's). We provide levers; they decide what to pull.
+- **No Docker, no Postgres, no React, no build step** — boring stack on purpose.
+- **No relationship graph visualization** — additive once interaction data is rich enough to mine; not core.
+
+(At v0 we also deferred portals, advanced segmentation, scoring, and plug-ins. All four shipped in v2–v4; see the Status banner at top.)
 
 ---
 
@@ -82,19 +105,29 @@ Each surface is independently usable. A user can drive the CRM entirely through 
 
 ---
 
-## 6. Data model (v0)
+## 6. Data model (v0 → v4.1)
 
-Two tiers: **14 tables at v0 install**, **6 more added by v1 migrations**. All single-company, no entity/tenant layer. Every mutation writes to `audit_log`.
+**31 application tables** across 7 migration files. All single-company, no entity/tenant layer. Every mutation writes to `audit_log`. Authoritative reference: [`docs/03-reference/data-model.md`](docs/03-reference/data-model.md).
 
-**v0 tables (in `schema.sql`):**
-`schema_versions`, `users`, `api_keys`, `audit_log`, `contacts`, `companies`, `tags`, `contact_tags`, `company_tags`, `interactions`, `notes`, `consent`, `webhooks`, `webhook_events`.
+Tables grouped by introducing version:
 
-`consent` is included at v0 so we can start recording it from day one (enforcement is v1).
+**v0** (15 tables in `migrations/0001_initial.sql`):
+`schema_versions`, `users`, `sessions`, `api_keys`, `audit_log`, `contacts`, `companies`, `tags`, `contact_tags`, `company_tags`, `interactions`, `notes`, `consent`, `webhooks`, `webhook_events`.
 
-**v1 tables (added via migrations):**
-`pipelines`, `pipeline_stages`, `deals`, `tasks`, `forms`, `form_submissions`.
+**v1** (6 tables — `migrations/0002_v1.sql` + `0003_v1_fts.sql`):
+`pipelines`, `pipeline_stages`, `deals`, `tasks`, `forms`, `form_submissions`, plus the FTS5 virtual table `search_index` + 9 triggers, plus `idempotency_keys`.
 
-Keeping v1 tables out of v0 install matches the "no placeholders" rule: every table that exists at v0 is one the v0 service layer actually writes to.
+**v2** (3 tables — `migrations/0004_v2.sql`):
+`contact_scores`, `segments`, `segment_members`.
+
+**v3** (3 tables — `migrations/0005_v3.sql`):
+`portal_tokens`, `inbound_endpoints`, `inbound_events`.
+
+**v4** (5 tables — `migrations/0006_v4.sql`):
+`plugins`, `plugin_hooks`, `saved_views`, `roles`, `role_permissions`, `user_roles`.
+
+**v4.1** (no new tables — `migrations/0007_richer_contacts.sql` adds columns to `contacts`):
+birthday, pronouns, language, linkedin_url, twitter_url, instagram_url, website_url, about, interests_json, source, referrer, best_contact_window, do_not_contact.
 
 ### SQLite discipline
 
@@ -393,6 +426,9 @@ GCRM/                              ← folder name kept; "CRM" is the product na
 ---
 
 ## 9. Build phases
+
+> All phases through v4.1 are shipped. The plan below was written at v0; the actual execution roughly matched it. Listed here for design rationale, not as a roadmap. For "what exists now", see the Status banner at top + `README.md`.
+
 
 ### v0 — milestone 1 (the proof)
 

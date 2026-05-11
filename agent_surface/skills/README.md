@@ -1,26 +1,80 @@
 # Skills
 
-Markdown files in this directory describe CRM operations to an external AI agent harness (Claude Code, OpenClaw, Codex, Hermes, etc.). Each skill is self-contained: an agent reading the markdown alone should be able to invoke the right tool with the right arguments.
+Markdown files in this directory describe CRM operations to an
+external AI agent harness (Claude Code, OpenClaw, Codex, custom
+orchestrators). Each skill is self-contained — an agent reading the
+markdown alone should be able to invoke the right tool with the
+right arguments.
+
+For the meta-guide on writing more skills, see
+[docs/06-development/writing-a-skill.md](../../docs/06-development/writing-a-skill.md).
+
+## Catalog (v4.1)
+
+### Contacts
+- [create-contact.md](create-contact.md)
+- [find-contact.md](find-contact.md)
+- [update-contact.md](update-contact.md)
+- [delete-contact.md](delete-contact.md)
+- [tag-contact.md](tag-contact.md)
+
+### Companies
+- [create-company.md](create-company.md)
+
+### Activity
+- [log-interaction.md](log-interaction.md)
+- [add-note.md](add-note.md)
+- [record-consent.md](record-consent.md)
+
+### Pipelines + deals
+- [create-pipeline.md](create-pipeline.md)
+- [create-deal.md](create-deal.md)
+- [move-deal-stage.md](move-deal-stage.md)
+
+### Tasks
+- [create-task.md](create-task.md)
+- [complete-task.md](complete-task.md)
+
+### Forms + inbound
+- [build-form.md](build-form.md)
+- [register-inbound-endpoint.md](register-inbound-endpoint.md)
+
+### Scoring + segments + reports
+- [score-contact.md](score-contact.md)
+- [evaluate-segment.md](evaluate-segment.md)
+- [run-report.md](run-report.md)
+
+### Portals
+- [issue-portal-token.md](issue-portal-token.md)
+
+### Bulk + maintenance
+- [import-csv.md](import-csv.md)
+- [export-csv.md](export-csv.md)
+- [merge-duplicates.md](merge-duplicates.md)
+- [backup-database.md](backup-database.md)
 
 ## File format
 
 Each skill starts with YAML frontmatter:
 
-```
+```yaml
 ---
-name: short-kebab-name
-description: One-line summary of what this skill does and when to use it.
+verb: create
+noun: deal
+canonical_transport: rest
+mcp_tool: create_deal
+cli: deal create
+rest: POST /api/deals
+required_scope: write
+related: ["move-deal-stage", "find-deal"]
 ---
 ```
 
-The body explains: when to use, when NOT to use, how to invoke via MCP / REST / CLI, required arguments, error codes, and any tips.
+The body explains: when to use, when NOT to use, how to invoke via
+MCP / REST / CLI, required arguments, error codes, and tips.
 
-## Available skills (v0)
+## Naming convention
 
-- `create-contact.md` — Add a new person record
-- `find-contact.md` — Search contacts by name/email
-- `log-interaction.md` — Record a timeline event (email, call, meeting, etc.)
-- `add-note.md` — Add a visibility-scoped human note
-- `tag-contact.md` — Apply a tag to a contact
-
-More land as features ship in v1+.
+Files are `<verb>-<noun>.md`. Lowercase, hyphenated. Action-shaped.
+Predictable filenames let agents guess paths before listing the
+directory.
