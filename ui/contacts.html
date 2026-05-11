@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Contacts · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Contacts</h1>
+    <span class="meta">{{total}} total</span>
+  </div>
+
+  <form class="searchbar" method="get" action="/contacts">
+    <input type="search" name="q" value="{{q}}" placeholder="Search by name or email" autofocus>
+    <button class="btn secondary" type="submit">Search</button>
+  </form>
+
+  <form class="inline-form" method="post" action="/contacts/new">
+    <input type="hidden" name="csrf" value="{{csrf}}">
+    <div><label>Full name</label><input name="full_name" placeholder="Maya Sato"></div>
+    <div><label>Email</label><input name="email" type="email" placeholder="maya@example.com"></div>
+    <div><label>Phone</label><input name="phone" placeholder="+1 ..."></div>
+    <div><label>Title</label><input name="title" placeholder="Marketing Director"></div>
+    <button class="btn" type="submit">Add contact</button>
+  </form>
+
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Email</th><th>Phone</th><th>Title</th></tr>
+    </thead>
+    <tbody>
+      {{rows}}
+    </tbody>
+  </table>
+
+</main>
+</body>
+</html>

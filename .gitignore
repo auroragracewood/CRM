@@ -1,0 +1,37 @@
+# Local SQLite databases (never commit user data)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+crm.db
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Generated key files (e.g. first-run admin API key snapshot)
+*.key
+.first_run_key.txt
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Backups
+backups/
+*.backup

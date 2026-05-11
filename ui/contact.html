@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Contact · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>{{full_name}}<span class="muted" style="font-weight:400; margin-left:8px">#{{id}}</span></h1>
+    <span class="meta">created {{created_at}} · updated {{updated_at}}</span>
+  </div>
+
+  <div class="two-col">
+
+    <div>
+      <div class="card">
+        <h2>Details</h2>
+        <form method="post" action="/contacts/{{id}}/edit">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Full name</label><input name="full_name" value="{{full_name}}"></div>
+          <div class="row"><label>Email</label><input name="email" type="email" value="{{email}}"></div>
+          <div class="row"><label>Phone</label><input name="phone" value="{{phone}}"></div>
+          <div class="row"><label>Title</label><input name="title" value="{{title}}"></div>
+          <div class="row"><label>Location</label><input name="location" value="{{location}}"></div>
+          <div class="row"><label></label>
+            <div class="actions">
+              <button class="btn" type="submit">Save changes</button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Timeline</h2>
+        <form method="post" action="/contacts/{{id}}/interactions/new" style="margin-bottom:10px">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="inline-form" style="grid-template-columns: 130px 1fr auto">
+            <div><label>Type</label>
+              <select name="type">
+                <option value="email">email</option>
+                <option value="call">call</option>
+                <option value="meeting">meeting</option>
+                <option value="form_submission">form_submission</option>
+                <option value="page_view">page_view</option>
+                <option value="note_system">note_system</option>
+                <option value="system">system</option>
+              </select>
+            </div>
+            <div><label>Title / body</label><input name="title" placeholder="Short title"></div>
+            <button class="btn" type="submit">Log</button>
+          </div>
+          <input type="hidden" name="body" value="">
+        </form>
+        <table>
+          <thead><tr><th>occurred_at</th><th>type</th><th>title</th><th>body</th></tr></thead>
+          <tbody>{{timeline_rows}}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Notes</h2>
+        <form method="post" action="/contacts/{{id}}/notes/new" style="margin-bottom:10px">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row">
+            <label>Visibility</label>
+            <select name="visibility" style="max-width:140px">
+              <option value="team">team</option>
+              <option value="public">public</option>
+              <option value="private">private</option>
+            </select>
+          </div>
+          <div class="row"><label>Body</label><textarea name="body" required></textarea></div>
+          <div class="row"><label></label>
+            <div class="actions">
+              <button class="btn" type="submit">Add note</button>
+            </div>
+          </div>
+        </form>
+        {{notes_html}}
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Danger zone</h2>
+        <p class="muted" style="font-size:12px; margin-top:0">Soft-deletes this contact. Email becomes available again. Deleted contacts remain in the DB with <code>deleted_at</code> set.</p>
+        <form method="post" action="/contacts/{{id}}/delete" onsubmit="return confirm('Delete this contact?');">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <button class="btn danger" type="submit">Delete contact</button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div class="login-shell">
+  <div class="login-card">
+    <div class="brand">CRM</div>
+    <h1>Sign in to continue</h1>
+    {{error}}
+    <form method="post" action="/login" autocomplete="on">
+      <div class="row"><label>Email</label><input type="email" name="email" autofocus required></div>
+      <div class="row"><label>Password</label><input type="password" name="password" required></div>
+      <div class="row"><label></label><button class="btn" type="submit">Sign in</button></div>
+    </form>
+  </div>
+</div>
+</body>
+</html>

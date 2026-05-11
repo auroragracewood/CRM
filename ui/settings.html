@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Settings</h1>
+    <span class="meta">{{email}} · {{role}}</span>
+  </div>
+
+  {{new_key_block}}
+
+  <div class="card">
+    <h2>API keys</h2>
+    <p class="muted" style="font-size:12px; margin-top:0">
+      Bearer tokens for agent access (REST, MCP, CLI when remote). The raw key is shown
+      ONCE at creation; only the prefix and a hash are stored.
+    </p>
+
+    <form class="inline-form" method="post" action="/settings/keys/new" style="grid-template-columns: 2fr 1fr auto">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <div><label>Name</label><input name="name" placeholder="claude-code-on-laptop" required></div>
+      <div><label>Scope</label>
+        <select name="scope">
+          <option value="read">read</option>
+          <option value="write" selected>write</option>
+          <option value="admin">admin</option>
+        </select>
+      </div>
+      <button class="btn" type="submit">Generate key</button>
+    </form>
+
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Prefix</th><th>Scope</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody>
+        {{key_rows}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Webhooks</h2>
+    <p class="muted" style="font-size:12px; margin-top:0">
+      Outbound subscriptions. Events fire via the outbox pattern: enqueued in the same
+      transaction as the data change, delivered with HMAC-SHA256 signing and retry.
+    </p>
+
+    <form class="inline-form" method="post" action="/settings/webhooks/new" style="grid-template-columns: 2fr 1fr auto">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <div><label>URL</label><input name="url" type="url" placeholder="https://example.com/hook" required></div>
+      <div><label>Events (comma-separated; * = all)</label><input name="events" value="contact.created"></div>
+      <button class="btn" type="submit">Add webhook</button>
+    </form>
+
+    <table>
+      <thead>
+        <tr><th>URL</th><th>Events</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {{wh_rows}}
+      </tbody>
+    </table>
+  </div>
+
+</main>
+</body>
+</html>

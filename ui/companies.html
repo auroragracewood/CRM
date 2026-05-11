@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Companies · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Companies</h1>
+    <span class="meta">{{total}} total</span>
+  </div>
+
+  <form class="searchbar" method="get" action="/companies">
+    <input type="search" name="q" value="{{q}}" placeholder="Search by name or domain">
+    <button class="btn secondary" type="submit">Search</button>
+  </form>
+
+  <form class="inline-form" method="post" action="/companies/new">
+    <input type="hidden" name="csrf" value="{{csrf}}">
+    <div><label>Name</label><input name="name" placeholder="Acme Co." required></div>
+    <div><label>Domain</label><input name="domain" placeholder="acme.com"></div>
+    <div><label>Industry</label><input name="industry" placeholder="SaaS"></div>
+    <div><label>Location</label><input name="location" placeholder="Vancouver, BC"></div>
+    <button class="btn" type="submit">Add company</button>
+  </form>
+
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Domain</th><th>Industry</th><th>Location</th></tr>
+    </thead>
+    <tbody>
+      {{rows}}
+    </tbody>
+  </table>
+
+</main>
+</body>
+</html>

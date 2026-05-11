@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dashboard · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Dashboard</h1>
+    <span class="meta">All-time totals</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num">{{contacts}}</div><div class="label">Contacts</div></div>
+    <div class="stat"><div class="num">{{companies}}</div><div class="label">Companies</div></div>
+    <div class="stat"><div class="num">{{interactions}}</div><div class="label">Interactions</div></div>
+    <div class="stat"><div class="num">{{audits}}</div><div class="label">Audit entries</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent activity</h2>
+    <table>
+      <thead>
+        <tr><th>ts</th><th>surface</th><th>action</th><th>object</th></tr>
+      </thead>
+      <tbody>
+        {{audit_rows}}
+      </tbody>
+    </table>
+  </div>
+
+</main>
+</body>
+</html>
