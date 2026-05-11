@@ -37,6 +37,8 @@ from backend.services import (  # noqa: E402
     scoring as scoring_service,
     segments as segments_service,
     reports as reports_service,
+    portals as portals_service,
+    inbound as inbound_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
 
@@ -506,6 +508,66 @@ try:
         return {"ok": True, "items": reports_service.list_reports()}
 
     @mcp.tool()
+    def issue_portal_token(contact_id: int, scope: str = "client",
+                            label: str = "", expires_in_days: int = None) -> dict:
+        """Issue a self-service portal token for a contact. scope: client,
+        applicant, sponsor, member. Returns the raw token (show once)."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "portal_token": portals_service.issue(
+                ctx, contact_id, scope=scope, label=label or None,
+                expires_in_days=expires_in_days,
+            )}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_portal_tokens(contact_id: int) -> dict:
+        """List portal tokens for a contact (token bodies redacted to prefix)."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "items": portals_service.list_for_contact(ctx, contact_id)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def create_inbound_endpoint(slug: str, name: str, routing: dict = None,
+                                 description: str = "", generate_secret: bool = True) -> dict:
+        """Register an inbound endpoint at /in/{slug}. routing dict describes
+        how to parse POSTed payloads into contacts + interactions."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "endpoint": inbound_service.create_endpoint(
+                ctx, slug=slug, name=name, description=description or None,
+                routing=routing or {}, generate_secret=generate_secret,
+            )}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_inbound_endpoints() -> dict:
+        """List inbound endpoints."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "items": inbound_service.list_endpoints(ctx)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_inbound_events(endpoint_id: int, limit: int = 100) -> dict:
+        """List recent events received on an inbound endpoint."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, **inbound_service.list_events(ctx, endpoint_id, limit=limit)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
     def run_report(name: str, params: dict = None) -> dict:
         """Run a named report. params is a dict of kwargs. Available reports:
         dormant_high_value, top_intent_now, pipeline_velocity, conversion_funnel,
@@ -725,6 +787,32 @@ except ImportError:  # ----- fallback: minimal stdio JSON-RPC server -----
             if method == "run_report":
                 return {"ok": True, **reports_service.run(
                     ctx, params["name"], **(params.get("params") or {}),
+                )}
+            # portals
+            if method == "issue_portal_token":
+                return {"ok": True, "portal_token": portals_service.issue(
+                    ctx, int(params["contact_id"]),
+                    scope=params.get("scope", "client"),
+                    label=params.get("label"),
+                    expires_in_days=params.get("expires_in_days"),
+                )}
+            if method == "list_portal_tokens":
+                return {"ok": True, "items": portals_service.list_for_contact(
+                    ctx, int(params["contact_id"]))}
+            # inbound
+            if method == "create_inbound_endpoint":
+                return {"ok": True, "endpoint": inbound_service.create_endpoint(
+                    ctx, slug=params["slug"], name=params["name"],
+                    description=params.get("description"),
+                    routing=params.get("routing") or {},
+                    generate_secret=bool(params.get("generate_secret", True)),
+                )}
+            if method == "list_inbound_endpoints":
+                return {"ok": True, "items": inbound_service.list_endpoints(ctx)}
+            if method == "list_inbound_events":
+                return {"ok": True, **inbound_service.list_events(
+                    ctx, int(params["endpoint_id"]),
+                    limit=int(params.get("limit", 100)),
                 )}
             return {"ok": False, "error": {"code": "UNKNOWN_METHOD", "message": method, "details": {}}}
         except ServiceError as e:

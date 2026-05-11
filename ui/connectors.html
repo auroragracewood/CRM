@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Connectors · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Connectors</h1>
+    <span class="meta">inbound endpoints — POST /in/&lt;slug&gt;</span>
+  </div>
+
+  {{created_block}}
+
+  <div class="card">
+    <h2>Create an inbound endpoint</h2>
+    <p class="muted" style="font-size:12px; margin-top:0">
+      External systems POST JSON to <code>/in/&lt;slug&gt;</code>. Sign the body with
+      HMAC-SHA256 using the endpoint's shared secret and pass it as
+      <code>X-CRM-Inbound-Signature</code>. The default routing parses
+      <code>email</code> + <code>name</code> from the top-level payload, tags the
+      contact <code>inbound:&lt;slug&gt;</code>, and logs a <code>system</code>
+      interaction on their timeline. Customize via <code>PUT /api/inbound-endpoints/&lt;id&gt;</code>.
+    </p>
+    <form class="inline-form" method="post" action="/connectors/new"
+          style="grid-template-columns: 180px 1fr 2fr auto">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <div><label>Slug</label><input name="slug" placeholder="stripe-events" required pattern="[a-z0-9][a-z0-9_-]+"></div>
+      <div><label>Name</label><input name="name" placeholder="Stripe events" required></div>
+      <div><label>Description</label><input name="description" placeholder="optional"></div>
+      <button class="btn" type="submit">Create endpoint</button>
+    </form>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Public URL</th><th>Signing</th><th>Last received</th></tr>
+    </thead>
+    <tbody>
+      {{rows}}
+    </tbody>
+  </table>
+
+</main>
+</body>
+</html>

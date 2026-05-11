@@ -43,6 +43,8 @@ from backend.services import (  # noqa: E402
     scoring as scoring_service,
     segments as segments_service,
     reports as reports_service,
+    portals as portals_service,
+    inbound as inbound_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
 
@@ -558,6 +560,53 @@ def cmd_report_run(args):
     _print({"ok": True, **out})
 
 
+# ----- portals -----
+
+def cmd_portal_issue(args):
+    out = _handle(args, portals_service.issue, args.contact_id,
+                  scope=args.scope, label=args.label, expires_in_days=args.expires_in_days)
+    _print({"ok": True, "portal_token": out,
+            "url_hint": f"/portal/{out.get('token', '')[:20]}…"})
+
+
+def cmd_portal_list(args):
+    out = _handle(args, portals_service.list_for_contact, args.contact_id)
+    _print({"ok": True, "items": out})
+
+
+def cmd_portal_revoke(args):
+    out = _handle(args, portals_service.revoke, args.id)
+    _print({"ok": True, **out})
+
+
+# ----- inbound -----
+
+def cmd_inbound_create(args):
+    import json as _json
+    routing = _json.loads(args.routing) if args.routing else None
+    out = _handle(args, inbound_service.create_endpoint,
+                  slug=args.slug, name=args.name,
+                  description=args.description, routing=routing,
+                  generate_secret=not args.no_secret)
+    _print({"ok": True, "endpoint": out})
+
+
+def cmd_inbound_list(args):
+    out = _handle(args, inbound_service.list_endpoints)
+    _print({"ok": True, "items": out})
+
+
+def cmd_inbound_events(args):
+    out = _handle(args, inbound_service.list_events, args.id,
+                  limit=args.limit, offset=args.offset)
+    _print({"ok": True, **out})
+
+
+def cmd_inbound_delete(args):
+    out = _handle(args, inbound_service.delete_endpoint, args.id)
+    _print({"ok": True, **out})
+
+
 def cmd_backup_create(args):
     src = Path(DB_PATH)
     if not src.exists():
@@ -871,6 +920,41 @@ def build_parser():
     rr.add_argument("--name", required=True, choices=list(reports_service.CATALOG))
     rr.add_argument("--params", default="", help='JSON kwargs (e.g. \'{"days":14}\')')
     rr.set_defaults(func=cmd_report_run)
+
+    # portal
+    portal = sub.add_parser("portal", help="Portal tokens (self-service URLs)")
+    p_sub = portal.add_subparsers(dest="action", required=True)
+    p_i = p_sub.add_parser("issue")
+    p_i.add_argument("--contact-id", dest="contact_id", type=int, required=True)
+    p_i.add_argument("--scope", default="client",
+                     choices=list(portals_service.VALID_SCOPES))
+    p_i.add_argument("--label"); p_i.add_argument("--expires-in-days",
+                                                   dest="expires_in_days", type=int)
+    p_i.set_defaults(func=cmd_portal_issue)
+    p_l = p_sub.add_parser("list")
+    p_l.add_argument("--contact-id", dest="contact_id", type=int, required=True)
+    p_l.set_defaults(func=cmd_portal_list)
+    p_r = p_sub.add_parser("revoke"); p_r.add_argument("--id", type=int, required=True)
+    p_r.set_defaults(func=cmd_portal_revoke)
+
+    # inbound
+    inb = sub.add_parser("inbound", help="Inbound webhook endpoints (POST /in/{slug})")
+    in_sub = inb.add_subparsers(dest="action", required=True)
+    in_c = in_sub.add_parser("create")
+    in_c.add_argument("--slug", required=True)
+    in_c.add_argument("--name", required=True); in_c.add_argument("--description")
+    in_c.add_argument("--routing", help="JSON routing rules")
+    in_c.add_argument("--no-secret", dest="no_secret", action="store_true",
+                       help="don't generate a shared HMAC secret (unsigned endpoint)")
+    in_c.set_defaults(func=cmd_inbound_create)
+    in_l = in_sub.add_parser("list"); in_l.set_defaults(func=cmd_inbound_list)
+    in_e = in_sub.add_parser("events")
+    in_e.add_argument("--id", type=int, required=True)
+    in_e.add_argument("--limit", type=int, default=100)
+    in_e.add_argument("--offset", type=int, default=0)
+    in_e.set_defaults(func=cmd_inbound_events)
+    in_d = in_sub.add_parser("delete"); in_d.add_argument("--id", type=int, required=True)
+    in_d.set_defaults(func=cmd_inbound_delete)
 
     # backup
     backup = sub.add_parser("backup", help="Backup commands")

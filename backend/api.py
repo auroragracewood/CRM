@@ -39,6 +39,8 @@ from .services import (
     scoring as scoring_service,
     segments as segments_service,
     reports as reports_service,
+    portals as portals_service,
+    inbound as inbound_service,
 )
 from .services.contacts import ServiceError
 
@@ -64,6 +66,9 @@ _STATUS = {
     "SEGMENT_NOT_FOUND": 404,
     "SEGMENT_SLUG_EXISTS": 409,
     "REPORT_NOT_FOUND": 404,
+    "PORTAL_TOKEN_NOT_FOUND": 404,
+    "INBOUND_ENDPOINT_NOT_FOUND": 404,
+    "INBOUND_SLUG_EXISTS": 409,
 }
 
 
@@ -875,6 +880,116 @@ async def api_run_report(name: str, request: Request):
             "code": "VALIDATION_ERROR", "message": f"bad parameter: {e}",
             "details": {}, "request_id": ctx.request_id,
         }})
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+# ----- Portals (v3) -----
+
+@router.post("/contacts/{contact_id}/portal-tokens")
+async def api_issue_portal_token(contact_id: int, request: Request):
+    """Issue a portal token for a contact. Body: {scope?, label?, expires_in_days?}"""
+    ctx = build_context(request)
+    p = {}
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            p = await request.json()
+        except Exception:
+            p = {}
+    try:
+        token = portals_service.issue(
+            ctx, contact_id,
+            scope=p.get("scope", "client"),
+            label=p.get("label"),
+            expires_in_days=p.get("expires_in_days"),
+        )
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "portal_token": token, "request_id": ctx.request_id})
+
+
+@router.get("/contacts/{contact_id}/portal-tokens")
+async def api_list_portal_tokens(contact_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        items = portals_service.list_for_contact(ctx, contact_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "items": items, "request_id": ctx.request_id}
+
+
+@router.post("/portal-tokens/{token_id}/revoke")
+async def api_revoke_portal_token(token_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        out = portals_service.revoke(ctx, token_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+# ----- Inbound endpoints (v3) -----
+
+@router.post("/inbound-endpoints")
+async def api_create_inbound_endpoint(request: Request):
+    """Body: {slug, name, description?, routing?, generate_secret?: true}"""
+    ctx = build_context(request)
+    p = await request.json()
+    try:
+        ep = inbound_service.create_endpoint(
+            ctx, slug=p["slug"], name=p["name"],
+            description=p.get("description"),
+            routing=p.get("routing") or {},
+            generate_secret=bool(p.get("generate_secret", True)),
+        )
+    except (KeyError, ValueError, TypeError) as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": {
+            "code": "VALIDATION_ERROR", "message": str(e),
+            "details": {}, "request_id": ctx.request_id,
+        }})
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "endpoint": ep,
+                                                  "request_id": ctx.request_id})
+
+
+@router.get("/inbound-endpoints")
+async def api_list_inbound_endpoints(request: Request):
+    ctx = build_context(request)
+    try:
+        items = inbound_service.list_endpoints(ctx)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "items": items, "request_id": ctx.request_id}
+
+
+@router.get("/inbound-endpoints/{endpoint_id}")
+async def api_get_inbound_endpoint(endpoint_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        ep = inbound_service.get_endpoint(ctx, endpoint_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "endpoint": ep, "request_id": ctx.request_id}
+
+
+@router.get("/inbound-endpoints/{endpoint_id}/events")
+async def api_list_inbound_events(endpoint_id: int, request: Request,
+                                   limit: int = 100, offset: int = 0):
+    ctx = build_context(request)
+    try:
+        result = inbound_service.list_events(ctx, endpoint_id, limit=limit, offset=offset)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+@router.delete("/inbound-endpoints/{endpoint_id}")
+async def api_delete_inbound_endpoint(endpoint_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        out = inbound_service.delete_endpoint(ctx, endpoint_id)
     except ServiceError as e:
         return _error(e, ctx.request_id)
     return {"ok": True, **out, "request_id": ctx.request_id}

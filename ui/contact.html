@@ -95,6 +95,15 @@
       </div>
 
       <div class="card">
+        <h2>Portal access</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          Give this contact a self-service URL. They can see their profile,
+          activity, deals, and non-private notes — no admin login required.
+        </p>
+        {{portal_block}}
+      </div>
+
+      <div class="card">
         <h2>Danger zone</h2>
         <p class="muted" style="font-size:12px; margin-top:0">Soft-deletes this contact. Email becomes available again. Deleted contacts remain in the DB with <code>deleted_at</code> set.</p>
         <form method="post" action="/contacts/{{id}}/delete" onsubmit="return confirm('Delete this contact?');">

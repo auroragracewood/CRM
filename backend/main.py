@@ -33,6 +33,8 @@ from .services import (
     scoring as scoring_service,
     segments as segments_service,
     reports as reports_service,
+    portals as portals_service,
+    inbound as inbound_service,
 )
 from .services.contacts import ServiceError
 
@@ -101,6 +103,7 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
              ("Forms", "/forms", "forms"),
              ("Segments", "/segments", "segments"),
              ("Reports", "/reports", "reports"),
+             ("Connectors", "/connectors", "connectors"),
              ("Settings", "/settings", "settings")]
     links = "".join(
         f'<a href="{href}"{"class=active" if key == active else ""}>{label}</a>'.replace(
@@ -266,7 +269,7 @@ async def contacts_create_form(
 
 
 @app.get("/contacts/{contact_id}", response_class=HTMLResponse)
-def contact_detail(contact_id: int, request: Request):
+def contact_detail(contact_id: int, request: Request, portal_token: str = ""):
     sess = _require_session(request)
     ctx = _ctx_from_session(sess)
     try:
@@ -276,6 +279,7 @@ def contact_detail(contact_id: int, request: Request):
     timeline = interactions_service.list_for_contact(ctx, contact_id, limit=50)
     notes_list = notes_service.list_for_contact(ctx, contact_id)
     scores_data = scoring_service.get_scores(ctx, contact_id)
+    portal_tokens_list = portals_service.list_for_contact(ctx, contact_id)
     csrf = auth_mod.csrf_token_for(sess["id"])
 
     # Build scores HTML (compact bar visualization with evidence on hover).
@@ -349,6 +353,58 @@ def contact_detail(contact_id: int, request: Request):
         for n in notes_list
     ) or '<div class="empty" style="padding:14px">No notes yet.</div>'
 
+    # Portal tokens block — shows existing tokens + a "issue new" form. If
+    # ?portal_token=<raw> just arrived (after issuance), highlight the new URL.
+    base_url = os.environ.get("CRM_BASE_URL", "").rstrip("/") or ""
+    token_rows = []
+    for t in portal_tokens_list:
+        status = "revoked" if t.get("revoked_at") else "active"
+        token_rows.append(
+            f'<tr><td>{_h(t.get("label") or "—")}</td>'
+            f'<td class="mono faint">{_h(t.get("token_prefix"))}</td>'
+            f'<td>{_h(t["scope"])}</td>'
+            f'<td>{_h(status)}</td>'
+            f'<td class="mono faint">{_h(t.get("last_used_at") or "—")}</td>'
+            f'<td>'
+            + (
+                f'<form method="post" action="/portal-tokens/{t["id"]}/revoke" style="display:inline">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<input type="hidden" name="contact_id" value="{contact["id"]}">'
+                f'<button class="btn secondary" style="padding:3px 9px;font-size:10px">Revoke</button></form>'
+                if status == "active" else ""
+            )
+            + '</td></tr>'
+        )
+    tokens_table = "\n".join(token_rows) or '<tr><td colspan="6" class="empty">No portal tokens yet.</td></tr>'
+
+    new_token_block = ""
+    if portal_token:
+        portal_url = f'{base_url}/portal/{portal_token}' if base_url else f'/portal/{portal_token}'
+        new_token_block = (
+            f'<div class="flash success">'
+            f'<strong>New portal link (copy now — token only shown once):</strong>'
+            f'<pre>{_h(portal_url)}</pre></div>'
+        )
+
+    portal_block = (
+        new_token_block
+        + '<form class="inline-form" method="post" action="/contacts/' + str(contact["id"]) + '/portal-tokens" '
+          'style="grid-template-columns: 1fr 130px 130px auto">'
+        + f'<input type="hidden" name="csrf" value="{csrf}">'
+        + '<div><label>Label (optional)</label><input name="label" placeholder="e.g. v1 onboarding"></div>'
+        + '<div><label>Scope</label><select name="scope">'
+          '<option value="client">client</option>'
+          '<option value="applicant">applicant</option>'
+          '<option value="sponsor">sponsor</option>'
+          '<option value="member">member</option>'
+          '</select></div>'
+        + '<div><label>Expires in (days)</label><input name="expires_in_days" type="number" min="1" placeholder="empty = never"></div>'
+        + '<button class="btn" type="submit">Issue portal link</button>'
+        + '</form>'
+        + '<table><thead><tr><th>Label</th><th>Token</th><th>Scope</th><th>Status</th><th>Last used</th><th></th></tr></thead>'
+        + f'<tbody>{tokens_table}</tbody></table>'
+    )
+
     return HTMLResponse(_render(
         "contact.html",
         topnav=_topnav("contacts", sess, csrf),
@@ -364,6 +420,7 @@ def contact_detail(contact_id: int, request: Request):
         timeline_rows=timeline_rows,
         notes_html=notes_html,
         scores_html=scores_html,
+        portal_block=portal_block,
     ))
 
 
@@ -1506,6 +1563,279 @@ def reports_page(request: Request, run: str = ""):
         cards=cards,
         result=result_html,
     ))
+
+
+# ---------- portals (PUBLIC, no admin auth) ----------
+
+@app.get("/portal/{token}", response_class=HTMLResponse)
+def portal_view(token: str):
+    """A contact's self-service view. No admin session required. Validates the
+    token, renders profile + timeline + non-private notes + deal summary."""
+    data = portals_service.view_data(token)
+    if not data:
+        return HTMLResponse(
+            '<!DOCTYPE html><html><body style="font-family:sans-serif;padding:32px">'
+            '<h1>This link is no longer valid.</h1>'
+            '<p>The token may have expired or been revoked. Please contact us.</p>'
+            '</body></html>',
+            status_code=404,
+        )
+
+    contact = data["contact"]
+    company = data.get("company")
+    timeline = data["timeline"]
+    notes = data["notes"]
+    deals = data["deals"]
+
+    def _fmt_ts(ts):
+        if not ts: return ""
+        import time as _t
+        return _t.strftime("%Y-%m-%d", _t.localtime(int(ts)))
+
+    timeline_rows = "".join(
+        f'<tr><td class="mono faint">{_h(_fmt_ts(i.get("occurred_at")))}</td>'
+        f'<td><strong>{_h(i.get("type"))}</strong></td>'
+        f'<td>{_h(i.get("title") or "")}</td></tr>'
+        for i in timeline
+    ) or '<tr><td colspan="3" class="empty">No activity yet.</td></tr>'
+
+    notes_html = "".join(
+        f'<div class="card" style="padding:10px 12px;margin:0 0 6px 0">'
+        f'<div class="muted" style="font-size:11px">{_h(_fmt_ts(n.get("created_at")))}</div>'
+        f'<div style="margin-top:4px">{_h(n.get("body") or "")}</div>'
+        f'</div>'
+        for n in notes
+    ) or '<div class="empty" style="padding:12px">No notes shared.</div>'
+
+    deals_rows = "".join(
+        f'<tr><td><strong>{_h(d["title"])}</strong></td>'
+        f'<td>{_h(d.get("stage") or "")}</td>'
+        f'<td><span class="deal-status status-{_h(d["status"])}">{_h(d["status"])}</span></td>'
+        f'</tr>'
+        for d in deals
+    ) or '<tr><td colspan="3" class="empty">No deals.</td></tr>'
+
+    company_block = ""
+    if company:
+        company_block = (
+            f'<div class="card"><h2>Company</h2>'
+            f'<div class="kv"><div class="k">Name</div><div class="v">{_h(company["name"])}</div>'
+            + (f'<div class="k">Domain</div><div class="v">{_h(company.get("domain") or "")}</div>' if company.get("domain") else '')
+            + '</div></div>'
+        )
+
+    return HTMLResponse(
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+        f'<title>{_h(contact.get("full_name") or "Your portal")} · CRM</title>'
+        '<link rel="stylesheet" href="/static/styles.css"></head><body>'
+        '<header class="topbar"><span class="brand">PORTAL</span>'
+        f'<nav><a class="active">{_h(contact.get("full_name") or "Welcome")}</a></nav>'
+        f'<span class="user">scope: <span class="role">{_h(data["scope"])}</span></span>'
+        '</header>'
+        '<main class="content">'
+        f'<div class="pagebar"><h1>Hi {_h(contact.get("full_name") or "")}</h1>'
+        '<span class="meta">your self-service view</span></div>'
+        '<div class="two-col">'
+        '<div>'
+        '<div class="card"><h2>Your profile</h2>'
+        f'<div class="kv">'
+        f'<div class="k">Email</div><div class="v">{_h(contact.get("email") or "")}</div>'
+        f'<div class="k">Phone</div><div class="v">{_h(contact.get("phone") or "")}</div>'
+        f'<div class="k">Title</div><div class="v">{_h(contact.get("title") or "")}</div>'
+        f'<div class="k">Location</div><div class="v">{_h(contact.get("location") or "")}</div>'
+        '</div></div>'
+        f'{company_block}'
+        '<div class="card"><h2>Activity</h2><table>'
+        '<thead><tr><th>When</th><th>Type</th><th>Title</th></tr></thead>'
+        f'<tbody>{timeline_rows}</tbody></table></div>'
+        '</div>'
+        '<div>'
+        '<div class="card"><h2>Notes</h2>'
+        f'{notes_html}</div>'
+        '<div class="card"><h2>Deals</h2><table>'
+        '<thead><tr><th>Title</th><th>Stage</th><th>Status</th></tr></thead>'
+        f'<tbody>{deals_rows}</tbody></table></div>'
+        '</div></div></main></body></html>'
+    )
+
+
+# ---------- inbound webhook (PUBLIC) ----------
+
+@app.post("/in/{slug}")
+async def public_inbound(slug: str, request: Request):
+    """Public webhook receiver. Body is raw JSON; if the endpoint has a
+    shared_secret, X-CRM-Inbound-Signature is HMAC-SHA256(secret, body)."""
+    raw = await request.body()
+    headers = {k.decode().lower() if isinstance(k, bytes) else k.lower():
+               (v.decode() if isinstance(v, bytes) else v) for k, v in request.headers.items()}
+    ip = request.client.host if request.client else None
+    ua = headers.get("user-agent")
+    try:
+        result = inbound_service.receive(slug, raw, headers=headers, ip=ip, user_agent=ua)
+    except ServiceError as e:
+        return JSONResponse(status_code=404 if e.code == "INBOUND_ENDPOINT_NOT_FOUND" else 400,
+                            content={"ok": False, "error": {
+                                "code": e.code, "message": e.message, "details": e.details,
+                            }})
+    return {"ok": True, **result}
+
+
+# ---------- connectors admin (UI) ----------
+
+@app.get("/connectors", response_class=HTMLResponse)
+def connectors_page(request: Request, created: str = ""):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    eps = inbound_service.list_endpoints(ctx)
+    base_url = os.environ.get("CRM_BASE_URL", "").rstrip("/") or ""
+
+    rows = []
+    for e in eps:
+        public_url = f'{base_url}/in/{e["slug"]}' if base_url else f'/in/{e["slug"]}'
+        secret_pill = (
+            '<span class="task-prio prio-normal">signed</span>' if e["shared_secret"]
+            else '<span class="task-prio prio-low">unsigned</span>'
+        )
+        rows.append(
+            f'<tr>'
+            f'  <td><a href="/connectors/{e["id"]}">{_h(e["name"])}</a>'
+            f'    <div class="muted mono" style="font-size:11px">{_h(e["slug"])}</div></td>'
+            f'  <td class="mono"><a href="{public_url}" target="_blank">{public_url}</a></td>'
+            f'  <td>{secret_pill}</td>'
+            f'  <td class="mono faint">{_h(e.get("last_received_at") or "—")}</td>'
+            f'</tr>'
+        )
+    rows_html = "\n".join(rows) or '<tr><td colspan="4" class="empty">No inbound endpoints yet.</td></tr>'
+
+    created_block = (
+        f'<div class="flash success">Endpoint <code>{_h(created)}</code> created. '
+        f'See its detail page for the shared secret.</div>' if created else ""
+    )
+
+    return HTMLResponse(_render(
+        "connectors.html",
+        topnav=_topnav("connectors", sess, csrf),
+        rows=rows_html,
+        csrf=csrf,
+        created_block=created_block,
+    ))
+
+
+@app.post("/connectors/new")
+async def connectors_new(
+    request: Request,
+    slug: str = Form(...), name: str = Form(...),
+    description: str = Form(""),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    # Ship a sensible default routing — agents/users can edit the JSON later.
+    default_routing = {
+        "type": "system",
+        "email_path": "email",
+        "name_path": "name",
+        "title_template": f"Inbound from {name}",
+        "tags": [f"inbound:{slug}"],
+        "create_contact": True,
+    }
+    try:
+        inbound_service.create_endpoint(
+            ctx, slug=slug, name=name,
+            description=description.strip() or None,
+            routing=default_routing, generate_secret=True,
+        )
+    except ServiceError as e:
+        return RedirectResponse(f"/connectors?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/connectors?created={slug}", status_code=303)
+
+
+@app.get("/connectors/{endpoint_id}", response_class=HTMLResponse)
+def connector_detail(endpoint_id: int, request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    try:
+        ep = inbound_service.get_endpoint(ctx, endpoint_id)
+    except ServiceError as e:
+        raise HTTPException(404, e.message)
+    events = inbound_service.list_events(ctx, endpoint_id, limit=50)
+    base_url = os.environ.get("CRM_BASE_URL", "").rstrip("/") or ""
+    public_url = f'{base_url}/in/{ep["slug"]}' if base_url else f'/in/{ep["slug"]}'
+
+    ev_rows = "".join(
+        f'<tr><td class="mono faint">{_h(e.get("created_at"))}</td>'
+        f'<td>{_h(e["status"])}</td>'
+        f'<td>{(("<a href=&#34;/contacts/" + str(e["contact_id"]) + "&#34;>#" + str(e["contact_id"]) + "</a>") if e.get("contact_id") else "—")}</td>'
+        f'<td class="mono" style="font-size:11px">{_h((e.get("raw_payload") or "")[:120])}</td>'
+        f'<td>{_h(e.get("error") or "")}</td>'
+        f'</tr>'
+        for e in events["items"]
+    ) or '<tr><td colspan="5" class="empty">No events received yet.</td></tr>'
+
+    return HTMLResponse(_render(
+        "connector.html",
+        topnav=_topnav("connectors", sess, csrf),
+        id=str(ep["id"]),
+        slug=_h(ep["slug"]),
+        name=_h(ep["name"]),
+        description=_h(ep.get("description") or ""),
+        public_url=public_url,
+        shared_secret=_h(ep.get("shared_secret") or ""),
+        routing_json=_h(ep.get("routing_json") or ""),
+        ev_rows=ev_rows,
+        csrf=csrf,
+    ))
+
+
+@app.post("/connectors/{endpoint_id}/delete")
+async def connector_delete_form(endpoint_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        inbound_service.delete_endpoint(ctx, endpoint_id)
+    except ServiceError:
+        pass
+    return RedirectResponse("/connectors", status_code=303)
+
+
+# ---------- portal-token issuance from contact detail (UI affordance) ----------
+
+@app.post("/contacts/{contact_id}/portal-tokens")
+async def contact_issue_portal_token(
+    contact_id: int, request: Request,
+    scope: str = Form("client"),
+    expires_in_days: str = Form(""),
+    label: str = Form(""),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    eid = int(expires_in_days) if expires_in_days.strip() else None
+    try:
+        tok = portals_service.issue(ctx, contact_id, scope=scope,
+                                    label=label.strip() or None,
+                                    expires_in_days=eid)
+    except ServiceError as e:
+        return RedirectResponse(f"/contacts/{contact_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/contacts/{contact_id}?portal_token={tok['token']}", status_code=303)
+
+
+@app.post("/portal-tokens/{token_id}/revoke")
+async def portal_token_revoke_form(token_id: int, request: Request,
+                                   contact_id: int = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        portals_service.revoke(ctx, token_id)
+    except ServiceError:
+        pass
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
 
 
 async def _dispatcher_loop():
