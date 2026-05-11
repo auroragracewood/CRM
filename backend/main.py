@@ -61,8 +61,8 @@ def _h(s) -> str:
     return html.escape(str(s) if s is not None else "")
 
 
-def _render(name: str, **kwargs) -> str:
-    txt = _tpl(name)
+def _render(template_name: str, **kwargs) -> str:
+    txt = _tpl(template_name)
     for k, v in kwargs.items():
         txt = txt.replace("{{" + k + "}}", v if isinstance(v, str) else str(v))
     return txt
