@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Segments · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Segments</h1>
+    <span class="meta">static lists + dynamic, rule-evaluated groups</span>
+  </div>
+
+  <div class="card">
+    <h2>Create a dynamic segment</h2>
+    <p class="muted" style="font-size:12px; margin-top:0">
+      Rule JSON uses <code>all</code> / <code>any</code> / <code>not</code> combinators
+      around <code>{field, op, value}</code> leaves.
+      Fields: <code>tag</code>, <code>tags</code>, <code>score.opportunity</code>,
+      <code>score.intent</code>, <code>last_interaction_days_ago</code>,
+      <code>interactions_last_90</code>, <code>email_consent</code>,
+      <code>has_open_deal</code>, <code>company_id</code>, <code>location</code>.
+      Ops: <code>=</code> <code>!=</code> <code>&gt;=</code> <code>&lt;=</code>
+      <code>&gt;</code> <code>&lt;</code> <code>has</code> <code>not_has</code>
+      <code>has_all</code> <code>has_any</code> <code>has_none</code>
+      <code>contains</code> <code>in</code> <code>is_null</code>.
+    </p>
+    <form method="post" action="/segments/new-dynamic">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <div class="row"><label>Name</label><input name="name" placeholder="Warm leads" required></div>
+      <div class="row"><label>Slug</label><input name="slug" placeholder="warm-leads" required pattern="[a-z0-9][a-z0-9_-]+"></div>
+      <div class="row"><label>Rules (JSON)</label>
+        <textarea name="rules" required placeholder='{"all":[{"field":"score.opportunity","op":">=","value":70}]}' style="font-family: ui-monospace, Consolas, monospace; font-size: 12px"></textarea>
+      </div>
+      <div class="row"><label></label>
+        <div class="actions"><button class="btn" type="submit">Create segment</button></div>
+      </div>
+    </form>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Type</th><th>Members</th><th>Last evaluated</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{rows}}
+    </tbody>
+  </table>
+
+</main>
+</body>
+</html>

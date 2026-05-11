@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Segment · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>{{name}}<span class="muted" style="font-weight:400; margin-left:8px">#{{id}}</span></h1>
+    <span class="meta">{{type}} · {{member_count}} member(s)</span>
+  </div>
+
+  <div class="two-col">
+
+    <div>
+      <div class="card">
+        <h2>Rules</h2>
+        <pre>{{rules_json}}</pre>
+      </div>
+
+      <div class="card">
+        <h2>Members</h2>
+        <table>
+          <thead><tr><th>Contact</th><th>Email</th><th>Added</th></tr></thead>
+          <tbody>{{rows}}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Actions</h2>
+        <form method="post" action="/segments/{{id}}/evaluate" style="margin-bottom:8px">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <button class="btn" type="submit">Re-evaluate</button>
+        </form>
+        <form method="post" action="/segments/{{id}}/delete" onsubmit="return confirm('Delete this segment?');">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <button class="btn danger" type="submit">Delete segment</button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

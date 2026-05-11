@@ -30,6 +30,9 @@ from .services import (
     forms as forms_service,
     search as search_service,
     duplicates as duplicates_service,
+    scoring as scoring_service,
+    segments as segments_service,
+    reports as reports_service,
 )
 from .services.contacts import ServiceError
 
@@ -96,6 +99,8 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
              ("Pipelines", "/pipelines", "pipelines"),
              ("Tasks", "/tasks", "tasks"),
              ("Forms", "/forms", "forms"),
+             ("Segments", "/segments", "segments"),
+             ("Reports", "/reports", "reports"),
              ("Settings", "/settings", "settings")]
     links = "".join(
         f'<a href="{href}"{"class=active" if key == active else ""}>{label}</a>'.replace(
@@ -270,7 +275,59 @@ def contact_detail(contact_id: int, request: Request):
         raise HTTPException(status_code=404, detail=e.message)
     timeline = interactions_service.list_for_contact(ctx, contact_id, limit=50)
     notes_list = notes_service.list_for_contact(ctx, contact_id)
+    scores_data = scoring_service.get_scores(ctx, contact_id)
     csrf = auth_mod.csrf_token_for(sess["id"])
+
+    # Build scores HTML (compact bar visualization with evidence on hover).
+    score_order = [
+        ("relationship_strength", "Relationship", "--moss"),
+        ("intent",                "Intent",       "--blueberry"),
+        ("fit",                   "Fit",          "--grey-5"),
+        ("risk",                  "Risk",         "--copper"),
+        ("opportunity",           "Opportunity",  "--blueberry-dark"),
+    ]
+    score_rows = []
+    for stype, label, color in score_order:
+        s = scores_data["scores"].get(stype)
+        if s:
+            evidence_html = "".join(
+                f'<li style="font-size:11px;color:var(--fg-muted)">'
+                f'  <span style="color:{("var(--moss-dark)" if e["delta"]>0 else "var(--copper-dark)" if e["delta"]<0 else "var(--fg-muted)")};font-weight:700">'
+                f'    {e["delta"]:+d}'
+                f'  </span> {_h(e["reason"])}'
+                f'</li>'
+                for e in s["evidence"]
+            )
+            score_rows.append(
+                f'<div class="score-row">'
+                f'  <div class="score-label">{label}</div>'
+                f'  <div class="score-bar"><div class="score-fill" '
+                f'       style="width:{s["score"]}%;background:var({color})"></div>'
+                f'    <span class="score-num">{s["score"]}</span></div>'
+                f'  <details class="score-evidence">'
+                f'    <summary class="muted" style="font-size:11px;cursor:pointer">why?</summary>'
+                f'    <ul style="margin:6px 0 0 14px;padding:0">{evidence_html}</ul>'
+                f'  </details>'
+                f'</div>'
+            )
+        else:
+            score_rows.append(
+                f'<div class="score-row">'
+                f'  <div class="score-label">{label}</div>'
+                f'  <div class="score-bar"><span class="muted" style="font-size:11px">not yet computed</span></div>'
+                f'  <div></div>'
+                f'</div>'
+            )
+    scores_html = (
+        '<form method="post" action="/contacts/' + str(contact_id) + '/score" style="margin-bottom:10px">'
+        + f'<input type="hidden" name="csrf" value="{csrf}">'
+        + '<button class="btn secondary" style="font-size:10px;padding:5px 10px" type="submit">Recompute now</button>'
+        + (f' <span class="faint" style="font-size:11px;margin-left:8px">'
+           f'last computed: {_h(next(iter(scores_data["scores"].values()), {}).get("computed_at", "never"))}'
+           f'</span>' if scores_data["scores"] else '')
+        + '</form>'
+        + "".join(score_rows)
+    )
 
     timeline_rows = "".join(
         f'<tr><td class="mono faint">{_h(i.get("occurred_at"))}</td>'
@@ -306,7 +363,21 @@ def contact_detail(contact_id: int, request: Request):
         csrf=csrf,
         timeline_rows=timeline_rows,
         notes_html=notes_html,
+        scores_html=scores_html,
     ))
+
+
+@app.post("/contacts/{contact_id}/score")
+async def contact_recompute_score_form(contact_id: int, request: Request,
+                                        csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        scoring_service.compute_for_contact(ctx, contact_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/contacts/{contact_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
 
 
 @app.post("/contacts/{contact_id}/interactions/new")
@@ -1258,6 +1329,183 @@ async def create_webhook(
 # ---------- background webhook dispatcher ----------
 
 _dispatcher_task: Optional[asyncio.Task] = None
+
+
+# ---------- segments UI ----------
+
+@app.get("/segments", response_class=HTMLResponse)
+def segments_page(request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    segs = segments_service.list_(ctx)
+
+    rows = []
+    for s in segs:
+        type_pill = (
+            '<span class="task-prio prio-normal">dynamic</span>' if s["type"] == "dynamic"
+            else '<span class="task-prio prio-low">static</span>'
+        )
+        rows.append(
+            f'<tr>'
+            f'  <td><a href="/segments/{s["id"]}">{_h(s["name"])}</a>'
+            f'    <div class="muted mono" style="font-size:11px">{_h(s["slug"])}</div></td>'
+            f'  <td>{type_pill}</td>'
+            f'  <td class="mono">{s["member_count"]}</td>'
+            f'  <td class="mono faint">{_h(s.get("last_evaluated_at") or "—")}</td>'
+            f'  <td>'
+            + (
+                f'<form method="post" action="/segments/{s["id"]}/evaluate" style="display:inline">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<button class="btn secondary" style="padding:3px 9px;font-size:10px">Evaluate</button></form>'
+                if s["type"] == "dynamic" else ""
+            )
+            + f'</td>'
+            f'</tr>'
+        )
+    rows_html = "\n".join(rows) or '<tr><td colspan="5" class="empty">No segments yet. Create one below.</td></tr>'
+
+    return HTMLResponse(_render(
+        "segments.html",
+        topnav=_topnav("segments", sess, csrf),
+        rows=rows_html,
+        csrf=csrf,
+    ))
+
+
+@app.post("/segments/new-dynamic")
+async def segment_create_dynamic_form(
+    request: Request,
+    name: str = Form(...), slug: str = Form(...),
+    rules: str = Form(""), csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    import json as _json
+    try:
+        rules_obj = _json.loads(rules or "{}")
+    except _json.JSONDecodeError as e:
+        return RedirectResponse(f"/segments?error=Invalid+JSON+rules:+{_h(str(e))}", status_code=303)
+    try:
+        seg = segments_service.create_dynamic(ctx, name=name, slug=slug, rules=rules_obj)
+    except ServiceError as e:
+        return RedirectResponse(f"/segments?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/segments/{seg['id']}", status_code=303)
+
+
+@app.post("/segments/{segment_id}/evaluate")
+async def segment_evaluate_form(segment_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        segments_service.evaluate(ctx, segment_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/segments?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/segments", status_code=303)
+
+
+@app.get("/segments/{segment_id}", response_class=HTMLResponse)
+def segment_detail(segment_id: int, request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    try:
+        seg = segments_service.get(ctx, segment_id)
+    except ServiceError as e:
+        raise HTTPException(404, e.message)
+    members = segments_service.list_members(ctx, segment_id, limit=500)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
+    rows = "".join(
+        f'<tr><td><a href="/contacts/{m["id"]}">{_h(m.get("full_name") or m.get("email") or f"#{m[chr(39)+chr(105)+chr(100)+chr(39)]}")}</a></td>'
+        f'<td class="mono">{_h(m.get("email") or "")}</td>'
+        f'<td class="mono faint">{_h(m.get("added_at"))}</td></tr>'
+        for m in members["items"]
+    ) or '<tr><td colspan="3" class="empty">No members in this segment.</td></tr>'
+
+    return HTMLResponse(_render(
+        "segment.html",
+        topnav=_topnav("segments", sess, csrf),
+        id=str(seg["id"]),
+        name=_h(seg["name"]),
+        slug=_h(seg["slug"]),
+        type=_h(seg["type"]),
+        member_count=str(seg["member_count"]),
+        rules_json=_h(seg.get("rules_json") or "— (static segment)"),
+        rows=rows,
+        csrf=csrf,
+    ))
+
+
+@app.post("/segments/{segment_id}/delete")
+async def segment_delete_form(segment_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        segments_service.delete(ctx, segment_id)
+    except ServiceError:
+        pass
+    return RedirectResponse("/segments", status_code=303)
+
+
+# ---------- reports UI ----------
+
+@app.get("/reports", response_class=HTMLResponse)
+def reports_page(request: Request, run: str = ""):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    catalog = reports_service.list_reports()
+
+    cards = "".join(
+        f'<div class="card report-card">'
+        f'  <h2>{_h(r["name"])}</h2>'
+        f'  <p class="muted" style="font-size:12px; margin-top:0">{_h(r["description"])}</p>'
+        f'  <div class="actions">'
+        f'    <a class="btn" href="/reports?run={r["name"]}">Run</a>'
+        f'    <a class="btn secondary" href="/api/reports/{r["name"]}.csv">CSV</a>'
+        f'  </div>'
+        f'</div>'
+        for r in catalog
+    )
+
+    result_html = ""
+    if run:
+        try:
+            result = reports_service.run(ctx, run)
+        except ServiceError as e:
+            result_html = f'<div class="flash error">{_h(e.message)}</div>'
+        else:
+            cols = result["columns"]
+            head = "".join(f"<th>{_h(c)}</th>" for c in cols)
+            body = "".join(
+                "<tr>" + "".join(f"<td class='mono'>{_h(row.get(c) if isinstance(row, dict) else getattr(row, c, ''))}</td>" for c in cols) + "</tr>"
+                for row in result["rows"]
+            ) or f'<tr><td colspan="{len(cols)}" class="empty">No rows.</td></tr>'
+            totals_str = ""
+            if result.get("totals"):
+                totals_str = (
+                    '<p class="muted" style="font-size:12px">'
+                    + "; ".join(f"{k} = <strong>{v}</strong>" for k, v in result["totals"].items())
+                    + "</p>"
+                )
+            result_html = (
+                f'<div class="card">'
+                f'  <h2>{_h(result["name"])}<span class="muted" style="font-weight:400;margin-left:10px">{_h(result["description"])}</span></h2>'
+                f'  {totals_str}'
+                f'  <table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+                f'  <p style="margin-top:10px"><a class="btn secondary" href="/api/reports/{run}.csv">Download CSV</a></p>'
+                f'</div>'
+            )
+
+    return HTMLResponse(_render(
+        "reports.html",
+        topnav=_topnav("reports", sess, csrf),
+        cards=cards,
+        result=result_html,
+    ))
 
 
 async def _dispatcher_loop():

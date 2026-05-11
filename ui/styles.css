@@ -88,6 +88,47 @@ a.active { color: var(--grey-10); }
 .topsearch input[type=search]:focus { outline: none; border-color: var(--blueberry); background: var(--grey-1); }
 mark { background: var(--blueberry); color: var(--grey-10); padding: 0 2px; }
 
+/* Scoring panel */
+.score-row {
+  display: grid; grid-template-columns: 110px 1fr;
+  gap: 10px; align-items: center; margin-bottom: 6px;
+  padding: 2px 0;
+}
+.score-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--fg-muted); font-weight: 700;
+}
+.score-bar {
+  position: relative; height: 18px; background: var(--grey-9);
+  border: 1px solid var(--border); overflow: hidden;
+}
+.score-fill {
+  height: 100%; transition: width .25s ease;
+}
+.score-num {
+  position: absolute; top: 0; right: 6px; line-height: 18px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 10.5px; font-weight: 700; color: var(--fg);
+}
+.score-evidence {
+  grid-column: 2 / 3;
+}
+.score-evidence ul { list-style: none; padding-left: 0 !important; }
+.score-evidence li { padding: 1px 0; }
+
+/* Reports grid */
+.reports-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.report-card { margin: 0; }
+.report-card h2 {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 11.5px; color: var(--blueberry); letter-spacing: 0;
+  text-transform: none;
+}
+.report-card .actions { gap: 6px; margin-top: 8px; }
+
 /* Main content */
 main.content { padding: 18px 22px; max-width: 1200px; margin: 0 auto; }
 

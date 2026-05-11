@@ -34,6 +34,9 @@ from backend.services import (  # noqa: E402
     pipelines as pipelines_service,
     deals as deals_service,
     tasks as tasks_service,
+    scoring as scoring_service,
+    segments as segments_service,
+    reports as reports_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
 
@@ -435,6 +438,100 @@ try:
             return _err(e)
 
     @mcp.tool()
+    def score_contact(contact_id: int) -> dict:
+        """Recompute all five scores (relationship_strength, intent, fit, risk,
+        opportunity) for a contact. Persists results + evidence."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, **scoring_service.compute_for_contact(ctx, contact_id)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def get_scores(contact_id: int) -> dict:
+        """Fetch persisted scores + evidence for a contact (no recompute)."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, **scoring_service.get_scores(ctx, contact_id)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def create_dynamic_segment(name: str, slug: str, rules: dict) -> dict:
+        """Create a dynamic segment. rules is a JSON tree like:
+        {"all": [{"field": "score.opportunity", "op": ">=", "value": 70}]}"""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "segment": segments_service.create_dynamic(
+                ctx, name=name, slug=slug, rules=rules)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_segments() -> dict:
+        """List all segments (with member counts)."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "items": segments_service.list_(ctx)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_segment_members(segment_id: int, limit: int = 200) -> dict:
+        """List the contacts belonging to a segment."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, **segments_service.list_members(ctx, segment_id, limit=limit)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def evaluate_segment(segment_id: int) -> dict:
+        """Re-evaluate a dynamic segment's membership against current data."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, **segments_service.evaluate(ctx, segment_id)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_reports_catalog() -> dict:
+        """List available reports (name + one-line description)."""
+        return {"ok": True, "items": reports_service.list_reports()}
+
+    @mcp.tool()
+    def run_report(name: str, params: dict = None) -> dict:
+        """Run a named report. params is a dict of kwargs. Available reports:
+        dormant_high_value, top_intent_now, pipeline_velocity, conversion_funnel,
+        deal_pipeline_summary, lead_sources, tag_distribution, overdue_tasks,
+        recent_form_submissions."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, **reports_service.run(ctx, name, **(params or {}))}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def top_contacts_by_score(score_type: str = "opportunity",
+                              min_score: int = None, limit: int = 20) -> dict:
+        """List contacts ranked by a score type. score_type: opportunity, intent,
+        relationship_strength, risk, fit."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            items = scoring_service.list_top(ctx, score_type, limit=limit, min_score=min_score)
+            return {"ok": True, "items": items, "score_type": score_type}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
     def update_task(task_id: int, status: str = "", priority: str = "",
                     due_date: int = None, title: str = "", description: str = "",
                     assigned_to: int = None) -> dict:
@@ -597,6 +694,38 @@ except ImportError:  # ----- fallback: minimal stdio JSON-RPC server -----
             if method == "update_task":
                 tid = int(params.pop("task_id"))
                 return {"ok": True, "task": tasks_service.update(ctx, tid, params)}
+            # scoring
+            if method == "score_contact":
+                return {"ok": True, **scoring_service.compute_for_contact(ctx, int(params["contact_id"]))}
+            if method == "get_scores":
+                return {"ok": True, **scoring_service.get_scores(ctx, int(params["contact_id"]))}
+            if method == "top_contacts_by_score":
+                items = scoring_service.list_top(
+                    ctx, params.get("score_type", "opportunity"),
+                    limit=int(params.get("limit", 20)),
+                    min_score=params.get("min_score"),
+                )
+                return {"ok": True, "items": items, "score_type": params.get("score_type", "opportunity")}
+            # segments
+            if method == "create_dynamic_segment":
+                return {"ok": True, "segment": segments_service.create_dynamic(
+                    ctx, name=params["name"], slug=params["slug"],
+                    rules=params.get("rules") or {})}
+            if method == "list_segments":
+                return {"ok": True, "items": segments_service.list_(ctx)}
+            if method == "list_segment_members":
+                return {"ok": True, **segments_service.list_members(
+                    ctx, int(params["segment_id"]),
+                    limit=int(params.get("limit", 200)))}
+            if method == "evaluate_segment":
+                return {"ok": True, **segments_service.evaluate(ctx, int(params["segment_id"]))}
+            # reports
+            if method == "list_reports_catalog":
+                return {"ok": True, "items": reports_service.list_reports()}
+            if method == "run_report":
+                return {"ok": True, **reports_service.run(
+                    ctx, params["name"], **(params.get("params") or {}),
+                )}
             return {"ok": False, "error": {"code": "UNKNOWN_METHOD", "message": method, "details": {}}}
         except ServiceError as e:
             return _err(e)

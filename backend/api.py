@@ -36,6 +36,9 @@ from .services import (
     duplicates as duplicates_service,
     search as search_service,
     imports as imports_service,
+    scoring as scoring_service,
+    segments as segments_service,
+    reports as reports_service,
 )
 from .services.contacts import ServiceError
 
@@ -58,6 +61,9 @@ _STATUS = {
     "USER_NOT_FOUND": 404,
     "FORM_NOT_FOUND": 404,
     "FORM_SLUG_EXISTS": 409,
+    "SEGMENT_NOT_FOUND": 404,
+    "SEGMENT_SLUG_EXISTS": 409,
+    "REPORT_NOT_FOUND": 404,
 }
 
 
@@ -703,6 +709,208 @@ def api_export_csv(kind: str, request: Request, include_deleted: bool = False):
         stream,
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{kind}.csv"'},
+    )
+
+
+# ----- Scoring (v2) -----
+
+@router.post("/contacts/{contact_id}/score")
+async def api_score_contact(contact_id: int, request: Request):
+    """Recompute all five scores for a contact and persist them."""
+    ctx = build_context(request)
+    try:
+        result = scoring_service.compute_for_contact(ctx, contact_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+@router.get("/contacts/{contact_id}/scores")
+async def api_get_scores(contact_id: int, request: Request):
+    """Return persisted scores + evidence for a contact."""
+    ctx = build_context(request)
+    try:
+        result = scoring_service.get_scores(ctx, contact_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+@router.post("/scoring/recompute-all")
+async def api_recompute_all(request: Request, limit: int = None):
+    """Admin-only: batch-recompute scores for every active contact."""
+    ctx = build_context(request)
+    try:
+        result = scoring_service.compute_for_all(ctx, limit=limit)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+@router.get("/scoring/top")
+async def api_top_scores(request: Request, type: str = "opportunity",
+                         min: int = None, limit: int = 20):
+    """List contacts ranked by a score type. Useful for `dormant high value`,
+    `top intent right now`, etc."""
+    ctx = build_context(request)
+    try:
+        items = scoring_service.list_top(ctx, type, limit=limit, min_score=min)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "items": items, "score_type": type, "request_id": ctx.request_id}
+
+
+# ----- Segments (v2) -----
+
+@router.post("/segments")
+async def api_create_segment(request: Request):
+    """Body: {type: 'static'|'dynamic', name, slug, ...}
+       - static  → also pass `contact_ids: [...]`
+       - dynamic → also pass `rules: {...}`
+    """
+    ctx = build_context(request)
+    p = await request.json()
+    try:
+        seg_type = p.get("type")
+        if seg_type == "static":
+            seg = segments_service.create_static(
+                ctx, name=p["name"], slug=p["slug"],
+                contact_ids=[int(x) for x in p.get("contact_ids", [])],
+            )
+        elif seg_type == "dynamic":
+            seg = segments_service.create_dynamic(
+                ctx, name=p["name"], slug=p["slug"], rules=p.get("rules") or {},
+            )
+        else:
+            raise ServiceError("VALIDATION_ERROR",
+                               "type must be 'static' or 'dynamic'")
+    except (KeyError, ValueError, TypeError) as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": {
+            "code": "VALIDATION_ERROR", "message": str(e),
+            "details": {}, "request_id": ctx.request_id,
+        }})
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "segment": seg,
+                                                  "request_id": ctx.request_id})
+
+
+@router.get("/segments")
+async def api_list_segments(request: Request):
+    ctx = build_context(request)
+    try:
+        items = segments_service.list_(ctx)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "items": items, "request_id": ctx.request_id}
+
+
+@router.get("/segments/{segment_id}")
+async def api_get_segment(segment_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        seg = segments_service.get(ctx, segment_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "segment": seg, "request_id": ctx.request_id}
+
+
+@router.get("/segments/{segment_id}/members")
+async def api_segment_members(segment_id: int, request: Request,
+                              limit: int = 200, offset: int = 0):
+    ctx = build_context(request)
+    try:
+        result = segments_service.list_members(ctx, segment_id, limit=limit, offset=offset)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+@router.post("/segments/{segment_id}/evaluate")
+async def api_segment_evaluate(segment_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        result = segments_service.evaluate(ctx, segment_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+@router.delete("/segments/{segment_id}")
+async def api_delete_segment(segment_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        result = segments_service.delete(ctx, segment_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **result, "request_id": ctx.request_id}
+
+
+# ----- Reports (v2) -----
+
+@router.get("/reports")
+async def api_list_reports(request: Request):
+    """List available reports (their name + one-line description)."""
+    ctx = build_context(request)
+    return {"ok": True, "items": reports_service.list_reports(), "request_id": ctx.request_id}
+
+
+@router.get("/reports/{name}")
+async def api_run_report(name: str, request: Request):
+    """Run a report by name. Any query-string params are forwarded as kwargs.
+    Integer-looking values are coerced to int."""
+    ctx = build_context(request)
+    # Map query params, coercing ints when sensible
+    raw = dict(request.query_params)
+    kw = {}
+    for k, v in raw.items():
+        try:
+            kw[k] = int(v)
+        except (TypeError, ValueError):
+            kw[k] = v
+    try:
+        out = reports_service.run(ctx, name, **kw)
+    except TypeError as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": {
+            "code": "VALIDATION_ERROR", "message": f"bad parameter: {e}",
+            "details": {}, "request_id": ctx.request_id,
+        }})
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+@router.get("/reports/{name}.csv")
+def api_run_report_csv(name: str, request: Request):
+    """Same report, streamed as CSV."""
+    from fastapi.responses import StreamingResponse
+    import csv as _csv
+    import io as _io
+    ctx = build_context(request)
+    raw = dict(request.query_params)
+    kw = {}
+    for k, v in raw.items():
+        try:
+            kw[k] = int(v)
+        except (TypeError, ValueError):
+            kw[k] = v
+    try:
+        out = reports_service.run(ctx, name, **kw)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+
+    def stream():
+        buf = _io.StringIO()
+        writer = _csv.DictWriter(buf, fieldnames=out["columns"], extrasaction="ignore")
+        writer.writeheader()
+        yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+        for row in out["rows"]:
+            writer.writerow(row)
+            yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+
+    return StreamingResponse(
+        stream(), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{name}.csv"'},
     )
 
 

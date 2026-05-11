@@ -40,6 +40,9 @@ from backend.services import (  # noqa: E402
     duplicates as duplicates_service,
     search as search_service,
     imports as imports_service,
+    scoring as scoring_service,
+    segments as segments_service,
+    reports as reports_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
 
@@ -471,6 +474,90 @@ def cmd_export(args):
         print(f"Wrote {args.out}", file=sys.stderr)
 
 
+# ----- scoring -----
+
+def cmd_score_contact(args):
+    out = _handle(args, scoring_service.compute_for_contact, args.id)
+    _print({"ok": True, **out})
+
+
+def cmd_score_get(args):
+    out = _handle(args, scoring_service.get_scores, args.id)
+    _print({"ok": True, **out})
+
+
+def cmd_score_recompute_all(args):
+    out = _handle(args, scoring_service.compute_for_all, limit=args.limit)
+    _print({"ok": True, **out})
+
+
+def cmd_score_top(args):
+    out = _handle(args, scoring_service.list_top, args.type,
+                  limit=args.limit, min_score=args.min)
+    _print({"ok": True, "items": out, "score_type": args.type})
+
+
+# ----- segments -----
+
+def cmd_segment_create_static(args):
+    ids = [int(x) for x in args.contact_ids.split(",") if x.strip()]
+    out = _handle(args, segments_service.create_static,
+                  name=args.name, slug=args.slug, contact_ids=ids)
+    _print({"ok": True, "segment": out})
+
+
+def cmd_segment_create_dynamic(args):
+    if args.rules.startswith("@"):
+        import json
+        rules = json.loads(Path(args.rules[1:]).read_text(encoding="utf-8"))
+    else:
+        import json
+        rules = json.loads(args.rules)
+    out = _handle(args, segments_service.create_dynamic,
+                  name=args.name, slug=args.slug, rules=rules)
+    _print({"ok": True, "segment": out})
+
+
+def cmd_segment_list(args):
+    out = _handle(args, segments_service.list_)
+    _print({"ok": True, "items": out})
+
+
+def cmd_segment_members(args):
+    out = _handle(args, segments_service.list_members, args.id,
+                  limit=args.limit, offset=args.offset)
+    _print({"ok": True, **out})
+
+
+def cmd_segment_evaluate(args):
+    out = _handle(args, segments_service.evaluate, args.id)
+    _print({"ok": True, **out})
+
+
+def cmd_segment_delete(args):
+    out = _handle(args, segments_service.delete, args.id)
+    _print({"ok": True, **out})
+
+
+# ----- reports -----
+
+def cmd_report_list(args):
+    _print({"ok": True, "items": reports_service.list_reports()})
+
+
+def cmd_report_run(args):
+    user_id, role = _resolve_user(args)
+    ctx = _ctx(args, role, user_id)
+    import json as _json
+    kw = _json.loads(args.params) if args.params else {}
+    try:
+        out = reports_service.run(ctx, args.name, **kw)
+    except ServiceError as e:
+        print(_json.dumps({"ok": False, "error": {"code": e.code, "message": e.message}}, indent=2))
+        sys.exit(1)
+    _print({"ok": True, **out})
+
+
 def cmd_backup_create(args):
     src = Path(DB_PATH)
     if not src.exists():
@@ -734,6 +821,56 @@ def build_parser():
     exp.add_argument("--out", help="optional output path; stdout if omitted")
     exp.add_argument("--include-deleted", dest="include_deleted", action="store_true")
     exp.set_defaults(func=cmd_export)
+
+    # score
+    score = sub.add_parser("score", help="Rule-based scoring")
+    sc_sub = score.add_subparsers(dest="action", required=True)
+    sc_c = sc_sub.add_parser("contact", help="Recompute scores for a contact")
+    sc_c.add_argument("--id", type=int, required=True)
+    sc_c.set_defaults(func=cmd_score_contact)
+    sc_g = sc_sub.add_parser("get", help="Fetch persisted scores for a contact")
+    sc_g.add_argument("--id", type=int, required=True)
+    sc_g.set_defaults(func=cmd_score_get)
+    sc_a = sc_sub.add_parser("recompute-all", help="Batch recompute (admin)")
+    sc_a.add_argument("--limit", type=int)
+    sc_a.set_defaults(func=cmd_score_recompute_all)
+    sc_t = sc_sub.add_parser("top", help="Top contacts by score type")
+    sc_t.add_argument("--type", default="opportunity",
+                      choices=list(scoring_service.SCORE_TYPES))
+    sc_t.add_argument("--min", type=int)
+    sc_t.add_argument("--limit", type=int, default=20)
+    sc_t.set_defaults(func=cmd_score_top)
+
+    # segment
+    seg = sub.add_parser("segment", help="Segments (static + dynamic)")
+    sg_sub = seg.add_subparsers(dest="action", required=True)
+    sg_cs = sg_sub.add_parser("create-static")
+    sg_cs.add_argument("--name", required=True); sg_cs.add_argument("--slug", required=True)
+    sg_cs.add_argument("--contact-ids", dest="contact_ids", required=True,
+                       help="comma-separated contact ids")
+    sg_cs.set_defaults(func=cmd_segment_create_static)
+    sg_cd = sg_sub.add_parser("create-dynamic")
+    sg_cd.add_argument("--name", required=True); sg_cd.add_argument("--slug", required=True)
+    sg_cd.add_argument("--rules", required=True,
+                       help='JSON rule tree, or @path/to/file.json')
+    sg_cd.set_defaults(func=cmd_segment_create_dynamic)
+    sg_l = sg_sub.add_parser("list"); sg_l.set_defaults(func=cmd_segment_list)
+    sg_m = sg_sub.add_parser("members"); sg_m.add_argument("--id", type=int, required=True)
+    sg_m.add_argument("--limit", type=int, default=200); sg_m.add_argument("--offset", type=int, default=0)
+    sg_m.set_defaults(func=cmd_segment_members)
+    sg_e = sg_sub.add_parser("evaluate"); sg_e.add_argument("--id", type=int, required=True)
+    sg_e.set_defaults(func=cmd_segment_evaluate)
+    sg_d = sg_sub.add_parser("delete"); sg_d.add_argument("--id", type=int, required=True)
+    sg_d.set_defaults(func=cmd_segment_delete)
+
+    # report
+    rep = sub.add_parser("report", help="Pre-built reports")
+    rsub = rep.add_subparsers(dest="action", required=True)
+    rl = rsub.add_parser("list"); rl.set_defaults(func=cmd_report_list)
+    rr = rsub.add_parser("run")
+    rr.add_argument("--name", required=True, choices=list(reports_service.CATALOG))
+    rr.add_argument("--params", default="", help='JSON kwargs (e.g. \'{"days":14}\')')
+    rr.set_defaults(func=cmd_report_run)
 
     # backup
     backup = sub.add_parser("backup", help="Backup commands")
