@@ -6,6 +6,7 @@ from ..context import ServiceContext
 from ..db import db
 from .. import audit, webhooks
 from .contacts import ServiceError, _row_to_dict
+from . import plugins as _plugins  # type: ignore
 
 
 _FIELDS = (
@@ -56,6 +57,7 @@ def create(ctx: ServiceContext, payload: dict) -> dict:
         audit.log(conn, ctx, action="company.created", object_type="company",
                   object_id=cid, after=company)
         webhooks.enqueue(conn, "company.created", {"company": company})
+        _plugins.dispatch("on_company_created", ctx, company, conn)
     return company
 
 

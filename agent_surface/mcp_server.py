@@ -39,6 +39,8 @@ from backend.services import (  # noqa: E402
     reports as reports_service,
     portals as portals_service,
     inbound as inbound_service,
+    plugins as plugins_service,
+    saved_views as saved_views_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
 
@@ -558,6 +560,50 @@ try:
             return _err(e)
 
     @mcp.tool()
+    def list_plugins() -> dict:
+        """List installed plug-ins + their hooks + enabled state."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "items": plugins_service.list_(ctx)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def reload_plugins() -> dict:
+        """Re-scan agent_surface/plugins/ and reload all modules. Admin only."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        if not ctx.is_admin():
+            return _err(ServiceError("FORBIDDEN", "reload requires admin"))
+        return {"ok": True, **plugins_service.reload_all()}
+
+    @mcp.tool()
+    def create_saved_view(entity: str, name: str, config: dict,
+                           slug: str = "", shared: bool = False) -> dict:
+        """Save a list-page filter + sort + columns combo. entity: contact,
+        company, deal, task, interaction."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "view": saved_views_service.create(
+                ctx, entity=entity, name=name, config=config,
+                slug=slug or None, shared=shared,
+            )}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
+    def list_saved_views(entity: str) -> dict:
+        """List saved views the caller can see for an entity (own + shared)."""
+        user_id, role = _resolve_user()
+        ctx = _ctx(role, user_id)
+        try:
+            return {"ok": True, "items": saved_views_service.list_for_entity(ctx, entity)}
+        except ServiceError as e:
+            return _err(e)
+
+    @mcp.tool()
     def list_inbound_events(endpoint_id: int, limit: int = 100) -> dict:
         """List recent events received on an inbound endpoint."""
         user_id, role = _resolve_user()
@@ -814,6 +860,25 @@ except ImportError:  # ----- fallback: minimal stdio JSON-RPC server -----
                     ctx, int(params["endpoint_id"]),
                     limit=int(params.get("limit", 100)),
                 )}
+            # plugins
+            if method == "list_plugins":
+                return {"ok": True, "items": plugins_service.list_(ctx)}
+            if method == "reload_plugins":
+                if not ctx.is_admin():
+                    return {"ok": False, "error": {
+                        "code": "FORBIDDEN", "message": "reload requires admin", "details": {},
+                    }}
+                return {"ok": True, **plugins_service.reload_all()}
+            # saved views
+            if method == "create_saved_view":
+                return {"ok": True, "view": saved_views_service.create(
+                    ctx, entity=params["entity"], name=params["name"],
+                    config=params.get("config") or {},
+                    slug=params.get("slug"), shared=bool(params.get("shared", False)),
+                )}
+            if method == "list_saved_views":
+                return {"ok": True, "items": saved_views_service.list_for_entity(
+                    ctx, params["entity"])}
             return {"ok": False, "error": {"code": "UNKNOWN_METHOD", "message": method, "details": {}}}
         except ServiceError as e:
             return _err(e)

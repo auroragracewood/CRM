@@ -12,6 +12,7 @@ from ..context import ServiceContext
 from ..db import db
 from .. import audit, webhooks
 from .contacts import ServiceError, _row_to_dict
+from . import plugins as _plugins  # type: ignore
 
 
 _FIELDS = (
@@ -89,6 +90,7 @@ def create(ctx: ServiceContext, payload: dict) -> dict:
         audit.log(conn, ctx, action="task.created", object_type="task",
                   object_id=tid, after=task)
         webhooks.enqueue(conn, "task.created", {"task": task})
+        _plugins.dispatch("on_task_created", ctx, task, conn)
     return task
 
 
@@ -197,6 +199,8 @@ def update(ctx: ServiceContext, task_id: int, payload: dict) -> dict:
         if "status" in cleaned and cleaned["status"] != before["status"]:
             webhooks.enqueue(conn, "task.status_changed",
                              {"task": after, "from": before["status"], "to": after["status"]})
+            if cleaned["status"] == "done":
+                _plugins.dispatch("on_task_completed", ctx, after, conn)
         webhooks.enqueue(conn, "task.updated", {"task": after})
     return after
 

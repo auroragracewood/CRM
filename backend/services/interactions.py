@@ -14,6 +14,7 @@ from ..context import ServiceContext
 from ..db import db
 from .. import audit, webhooks
 from .contacts import ServiceError, _row_to_dict
+from . import plugins as _plugins  # type: ignore
 
 
 VALID_TYPES = {"email", "call", "meeting", "form_submission",
@@ -76,6 +77,7 @@ def log(ctx: ServiceContext, payload: dict) -> dict:
         audit.log(conn, ctx, action="interaction.logged",
                   object_type="interaction", object_id=iid, after=item)
         webhooks.enqueue(conn, "interaction.logged", {"interaction": item})
+        _plugins.dispatch("on_interaction_logged", ctx, item, conn)
     return item
 
 

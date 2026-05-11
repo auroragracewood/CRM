@@ -45,6 +45,8 @@ from backend.services import (  # noqa: E402
     reports as reports_service,
     portals as portals_service,
     inbound as inbound_service,
+    plugins as plugins_service,
+    saved_views as saved_views_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
 
@@ -607,6 +609,48 @@ def cmd_inbound_delete(args):
     _print({"ok": True, **out})
 
 
+# ----- plug-ins -----
+
+def cmd_plugin_list(args):
+    out = _handle(args, plugins_service.list_)
+    _print({"ok": True, "items": out})
+
+
+def cmd_plugin_reload(args):
+    print(json.dumps({"ok": True, **plugins_service.reload_all()}, indent=2, default=str))
+
+
+def cmd_plugin_enable(args):
+    out = _handle(args, plugins_service.enable, args.id)
+    _print({"ok": True, **out})
+
+
+def cmd_plugin_disable(args):
+    out = _handle(args, plugins_service.disable, args.id)
+    _print({"ok": True, **out})
+
+
+# ----- saved views -----
+
+def cmd_view_create(args):
+    import json as _json
+    config = _json.loads(args.config) if args.config else {}
+    out = _handle(args, saved_views_service.create,
+                  entity=args.entity, name=args.name,
+                  config=config, slug=args.slug, shared=args.shared)
+    _print({"ok": True, "view": out})
+
+
+def cmd_view_list(args):
+    out = _handle(args, saved_views_service.list_for_entity, args.entity)
+    _print({"ok": True, "items": out})
+
+
+def cmd_view_delete(args):
+    out = _handle(args, saved_views_service.delete, args.id)
+    _print({"ok": True, **out})
+
+
 def cmd_backup_create(args):
     src = Path(DB_PATH)
     if not src.exists():
@@ -955,6 +999,34 @@ def build_parser():
     in_e.set_defaults(func=cmd_inbound_events)
     in_d = in_sub.add_parser("delete"); in_d.add_argument("--id", type=int, required=True)
     in_d.set_defaults(func=cmd_inbound_delete)
+
+    # plugin
+    plg = sub.add_parser("plugin", help="Plug-in registry")
+    plg_sub = plg.add_subparsers(dest="action", required=True)
+    plg_l = plg_sub.add_parser("list"); plg_l.set_defaults(func=cmd_plugin_list)
+    plg_r = plg_sub.add_parser("reload"); plg_r.set_defaults(func=cmd_plugin_reload)
+    plg_e = plg_sub.add_parser("enable"); plg_e.add_argument("--id", type=int, required=True)
+    plg_e.set_defaults(func=cmd_plugin_enable)
+    plg_d = plg_sub.add_parser("disable"); plg_d.add_argument("--id", type=int, required=True)
+    plg_d.set_defaults(func=cmd_plugin_disable)
+
+    # view (saved views)
+    view = sub.add_parser("view", help="Saved views (per-user filter+sort+columns)")
+    v_sub = view.add_subparsers(dest="action", required=True)
+    v_c = v_sub.add_parser("create")
+    v_c.add_argument("--entity", required=True,
+                     choices=list(saved_views_service.VALID_ENTITIES))
+    v_c.add_argument("--name", required=True); v_c.add_argument("--slug")
+    v_c.add_argument("--config", help='JSON config (filter/sort/columns)')
+    v_c.add_argument("--shared", action="store_true",
+                     help="visible to all users (default: private)")
+    v_c.set_defaults(func=cmd_view_create)
+    v_l = v_sub.add_parser("list")
+    v_l.add_argument("--entity", required=True,
+                     choices=list(saved_views_service.VALID_ENTITIES))
+    v_l.set_defaults(func=cmd_view_list)
+    v_d = v_sub.add_parser("delete"); v_d.add_argument("--id", type=int, required=True)
+    v_d.set_defaults(func=cmd_view_delete)
 
     # backup
     backup = sub.add_parser("backup", help="Backup commands")

@@ -34,6 +34,7 @@ from ..context import ServiceContext, system_context
 from ..db import db
 from .. import audit, webhooks
 from .contacts import ServiceError
+from . import plugins as _plugins  # type: ignore
 
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_\-]{1,63}$")
@@ -318,10 +319,12 @@ def receive(
                   object_type="inbound_event", object_id=eid,
                   after={"endpoint_slug": slug, "contact_id": contact_id,
                          "interaction_id": interaction_id})
-        webhooks.enqueue(conn, "inbound.received", {
+        event_summary = {
             "event_id": eid, "endpoint_slug": slug,
             "contact_id": contact_id, "interaction_id": interaction_id,
-        })
+        }
+        webhooks.enqueue(conn, "inbound.received", event_summary)
+        _plugins.dispatch("on_inbound_received", ctx, event_summary, conn)
 
     return {
         "event_id": eid, "status": status,

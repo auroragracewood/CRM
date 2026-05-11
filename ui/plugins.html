@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plug-ins · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Plug-ins</h1>
+    <span class="meta">in-process Python modules loaded from <code>agent_surface/plugins/</code></span>
+  </div>
+
+  {{reload_block}}
+
+  <div class="card">
+    <h2>How it works</h2>
+    <p class="muted" style="font-size:12px; margin-top:0">
+      A plug-in is a single <code>.py</code> file with a <code>NAME</code> constant
+      plus any of the <strong>known hooks</strong> as top-level functions
+      (<code>on_contact_created</code>, <code>on_deal_stage_changed</code>,
+      <code>compute_fit_score</code>, etc.). The host catches plug-in exceptions
+      and writes the traceback to <code>plugins.last_error</code> — a broken
+      plug-in cannot crash the server. See
+      <code>agent_surface/plugins/README.md</code> for the full hook list and
+      the <code>example_fit_score.py</code> walkthrough.
+    </p>
+    <form method="post" action="/plugins/reload">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <button class="btn" type="submit">Reload from disk</button>
+    </form>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Plug-in</th><th>Status</th><th>Hooks</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{rows}}
+    </tbody>
+  </table>
+
+</main>
+</body>
+</html>

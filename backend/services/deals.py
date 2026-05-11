@@ -6,6 +6,7 @@ from ..context import ServiceContext
 from ..db import db
 from .. import audit, webhooks
 from .contacts import ServiceError, _row_to_dict
+from . import plugins as _plugins  # type: ignore
 
 
 _FIELDS = (
@@ -66,6 +67,7 @@ def create(ctx: ServiceContext, payload: dict) -> dict:
         audit.log(conn, ctx, action="deal.created", object_type="deal",
                   object_id=did, after=deal)
         webhooks.enqueue(conn, "deal.created", {"deal": deal})
+        _plugins.dispatch("on_deal_created", ctx, deal, conn)
     return deal
 
 
@@ -153,9 +155,12 @@ def update(ctx: ServiceContext, deal_id: int, payload: dict) -> dict:
             webhooks.enqueue(conn, "deal.stage_changed",
                              {"deal": after, "from_stage": before["stage_id"],
                               "to_stage": after["stage_id"]})
+            _plugins.dispatch("on_deal_stage_changed", ctx, after,
+                              before["stage_id"], after["stage_id"], conn)
         audit.log(conn, ctx, action="deal.updated", object_type="deal",
                   object_id=deal_id, before=before, after=after)
         webhooks.enqueue(conn, "deal.updated", {"deal": after})
+        _plugins.dispatch("on_deal_updated", ctx, before, after, conn)
     return after
 
 

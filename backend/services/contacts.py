@@ -16,6 +16,7 @@ from typing import Optional
 from ..context import ServiceContext
 from ..db import db
 from .. import audit, webhooks
+from . import plugins as _plugins  # type: ignore
 
 
 _FIELDS = (
@@ -99,6 +100,7 @@ def create(ctx: ServiceContext, payload: dict) -> dict:
                   object_id=contact_id,
                   after=contact)
         webhooks.enqueue(conn, "contact.created", {"contact": contact})
+        _plugins.dispatch("on_contact_created", ctx, contact, conn)
 
     return contact
 
@@ -211,6 +213,7 @@ def update(ctx: ServiceContext, contact_id: int, payload: dict) -> dict:
                   action="contact.updated", object_type="contact",
                   object_id=contact_id, before=before, after=after)
         webhooks.enqueue(conn, "contact.updated", {"contact": after, "before": before})
+        _plugins.dispatch("on_contact_updated", ctx, before, after, conn)
 
     return after
 
@@ -234,4 +237,5 @@ def delete(ctx: ServiceContext, contact_id: int) -> dict:
                   action="contact.deleted", object_type="contact",
                   object_id=contact_id, before=before)
         webhooks.enqueue(conn, "contact.deleted", {"contact_id": contact_id})
+        _plugins.dispatch("on_contact_deleted", ctx, before, conn)
     return {"id": contact_id, "deleted_at": now}

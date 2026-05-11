@@ -35,6 +35,8 @@ from .services import (
     reports as reports_service,
     portals as portals_service,
     inbound as inbound_service,
+    plugins as plugins_service,
+    saved_views as saved_views_service,
 )
 from .services.contacts import ServiceError
 
@@ -104,6 +106,7 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
              ("Segments", "/segments", "segments"),
              ("Reports", "/reports", "reports"),
              ("Connectors", "/connectors", "connectors"),
+             ("Plug-ins", "/plugins", "plugins"),
              ("Settings", "/settings", "settings")]
     links = "".join(
         f'<a href="{href}"{"class=active" if key == active else ""}>{label}</a>'.replace(
@@ -1838,6 +1841,96 @@ async def portal_token_revoke_form(token_id: int, request: Request,
     return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
 
 
+# ---------- plug-ins admin UI ----------
+
+@app.get("/plugins", response_class=HTMLResponse)
+def plugins_page(request: Request, reloaded: str = ""):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    pls = plugins_service.list_(ctx)
+
+    rows = []
+    for p in pls:
+        status_pill = (
+            '<span class="task-prio prio-normal">enabled</span>' if p.get("enabled")
+            else '<span class="task-prio prio-low">disabled</span>'
+        )
+        loaded_pill = (
+            '<span class="task-prio prio-low" style="background:var(--moss)">loaded</span>'
+            if p.get("loaded") else
+            '<span class="task-prio prio-high">not loaded</span>'
+        )
+        hook_list = ", ".join(p.get("hooks") or []) or "<span class='faint'>no hooks</span>"
+        toggle_label = "Disable" if p["enabled"] else "Enable"
+        toggle_action = f'/plugins/{p["id"]}/{("disable" if p["enabled"] else "enable")}'
+        last_err = ""
+        if p.get("last_error"):
+            last_err = (
+                f'<details style="margin-top:6px"><summary class="muted" style="font-size:11px;cursor:pointer">last_error</summary>'
+                f'<pre style="font-size:10.5px">{_h(p["last_error"][:1500])}</pre></details>'
+            )
+        rows.append(
+            f'<tr><td><strong>{_h(p["name"])}</strong>'
+            f'  <div class="muted" style="font-size:11px">v{_h(p.get("version") or "?")} · {_h(p.get("description") or "")}</div></td>'
+            f'<td>{status_pill}<br>{loaded_pill}</td>'
+            f'<td class="mono" style="font-size:11px">{hook_list}{last_err}</td>'
+            f'<td><form method="post" action="{toggle_action}" style="display:inline">'
+            f'  <input type="hidden" name="csrf" value="{csrf}">'
+            f'  <button class="btn secondary" style="padding:4px 10px;font-size:10px">{toggle_label}</button>'
+            f'</form></td></tr>'
+        )
+    rows_html = "\n".join(rows) or '<tr><td colspan="4" class="empty">No plug-ins installed. Drop a .py file into agent_surface/plugins/ then click Reload.</td></tr>'
+
+    reload_block = (
+        f'<div class="flash success">Reload complete. See traceback (if any) in the table.</div>'
+        if reloaded else ""
+    )
+
+    return HTMLResponse(_render(
+        "plugins.html",
+        topnav=_topnav("plugins", sess, csrf),
+        rows=rows_html,
+        csrf=csrf,
+        reload_block=reload_block,
+    ))
+
+
+@app.post("/plugins/reload")
+async def plugins_reload_form(request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    try:
+        plugins_service.reload_all()
+    except Exception:
+        pass
+    return RedirectResponse("/plugins?reloaded=1", status_code=303)
+
+
+@app.post("/plugins/{plugin_id}/enable")
+async def plugin_enable_form(plugin_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        plugins_service.enable(ctx, plugin_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/plugins?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/plugins", status_code=303)
+
+
+@app.post("/plugins/{plugin_id}/disable")
+async def plugin_disable_form(plugin_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        plugins_service.disable(ctx, plugin_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/plugins?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/plugins", status_code=303)
+
+
 async def _dispatcher_loop():
     """Drains the webhook_events outbox every 2 seconds."""
     while True:
@@ -1852,6 +1945,11 @@ async def _dispatcher_loop():
 @app.on_event("startup")
 async def _startup():
     global _dispatcher_task
+    # Load plug-ins at startup so hooks fire from the first request.
+    try:
+        plugins_service.reload_all()
+    except Exception:
+        pass
     if os.environ.get("CRM_DISABLE_DISPATCHER") != "1":
         _dispatcher_task = asyncio.create_task(_dispatcher_loop())
 

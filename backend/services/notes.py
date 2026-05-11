@@ -11,6 +11,7 @@ from ..context import ServiceContext
 from ..db import db
 from .. import audit, webhooks
 from .contacts import ServiceError, _row_to_dict
+from . import plugins as _plugins  # type: ignore
 
 
 VISIBILITIES = ("public", "team", "private")
@@ -51,6 +52,7 @@ def create(
                          "created_by": ctx.user_id})
         redact = ["body"] if visibility == "private" else None
         webhooks.enqueue(conn, "note.created", dict(note), redact_keys=redact)
+        _plugins.dispatch("on_note_created", ctx, note, conn)
     return note
 
 

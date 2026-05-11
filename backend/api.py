@@ -41,6 +41,8 @@ from .services import (
     reports as reports_service,
     portals as portals_service,
     inbound as inbound_service,
+    plugins as plugins_service,
+    saved_views as saved_views_service,
 )
 from .services.contacts import ServiceError
 
@@ -69,6 +71,8 @@ _STATUS = {
     "PORTAL_TOKEN_NOT_FOUND": 404,
     "INBOUND_ENDPOINT_NOT_FOUND": 404,
     "INBOUND_SLUG_EXISTS": 409,
+    "PLUGIN_NOT_FOUND": 404,
+    "SAVED_VIEW_NOT_FOUND": 404,
 }
 
 
@@ -990,6 +994,100 @@ async def api_delete_inbound_endpoint(endpoint_id: int, request: Request):
     ctx = build_context(request)
     try:
         out = inbound_service.delete_endpoint(ctx, endpoint_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+# ----- Plug-ins (v4) -----
+
+@router.get("/plugins")
+async def api_list_plugins(request: Request):
+    ctx = build_context(request)
+    try:
+        items = plugins_service.list_(ctx)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "items": items, "request_id": ctx.request_id}
+
+
+@router.post("/plugins/reload")
+async def api_reload_plugins(request: Request):
+    ctx = build_context(request)
+    if not ctx.is_admin():
+        return _error(ServiceError("FORBIDDEN", "reload requires admin"), ctx.request_id)
+    return {"ok": True, **plugins_service.reload_all(), "request_id": ctx.request_id}
+
+
+@router.post("/plugins/{plugin_id}/enable")
+async def api_enable_plugin(plugin_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        out = plugins_service.enable(ctx, plugin_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+@router.post("/plugins/{plugin_id}/disable")
+async def api_disable_plugin(plugin_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        out = plugins_service.disable(ctx, plugin_id)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, **out, "request_id": ctx.request_id}
+
+
+# ----- Saved views (v4) -----
+
+@router.post("/saved-views")
+async def api_create_saved_view(request: Request):
+    ctx = build_context(request)
+    p = await request.json()
+    try:
+        view = saved_views_service.create(
+            ctx, entity=p["entity"], name=p["name"],
+            config=p.get("config") or {}, slug=p.get("slug"),
+            shared=bool(p.get("shared", False)),
+        )
+    except (KeyError, ValueError) as e:
+        return JSONResponse(status_code=400, content={"ok": False, "error": {
+            "code": "VALIDATION_ERROR", "message": str(e),
+            "details": {}, "request_id": ctx.request_id,
+        }})
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return JSONResponse(status_code=201, content={"ok": True, "view": view,
+                                                  "request_id": ctx.request_id})
+
+
+@router.get("/saved-views/{entity}")
+async def api_list_saved_views(entity: str, request: Request):
+    ctx = build_context(request)
+    try:
+        items = saved_views_service.list_for_entity(ctx, entity)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "items": items, "request_id": ctx.request_id}
+
+
+@router.put("/saved-views/{view_id}")
+async def api_update_saved_view(view_id: int, request: Request):
+    ctx = build_context(request)
+    p = await request.json()
+    try:
+        view = saved_views_service.update(ctx, view_id, p)
+    except ServiceError as e:
+        return _error(e, ctx.request_id)
+    return {"ok": True, "view": view, "request_id": ctx.request_id}
+
+
+@router.delete("/saved-views/{view_id}")
+async def api_delete_saved_view(view_id: int, request: Request):
+    ctx = build_context(request)
+    try:
+        out = saved_views_service.delete(ctx, view_id)
     except ServiceError as e:
         return _error(e, ctx.request_id)
     return {"ok": True, **out, "request_id": ctx.request_id}

@@ -20,6 +20,7 @@ from ..context import ServiceContext
 from ..db import db
 from .. import audit
 from .contacts import ServiceError
+from . import plugins as _plugins  # type: ignore
 
 
 SCORE_TYPES = ("relationship_strength", "intent", "fit", "risk", "opportunity")
@@ -263,7 +264,13 @@ def compute_for_contact(ctx: ServiceContext, contact_id: int, *,
         sig = _signals_for(conn, contact_id)
         rel_score, rel_ev   = _score_relationship_strength(sig)
         int_score, int_ev   = _score_intent(sig)
-        fit_score, fit_ev   = _score_fit(sig)
+        # Fit score: plug-in override if any plug-in implements compute_fit_score
+        # and returns non-None; otherwise fall back to the built-in default.
+        plugin_fit = _plugins.compute_fit_score_via_plugin(ctx, contact_id)
+        if plugin_fit is not None:
+            fit_score, fit_ev = plugin_fit
+        else:
+            fit_score, fit_ev = _score_fit(sig)
         risk_score, risk_ev = _score_risk(sig)
         opp_score, opp_ev   = _score_opportunity(int_score, rel_score, fit_score, risk_score)
 
@@ -292,6 +299,7 @@ def compute_for_contact(ctx: ServiceContext, contact_id: int, *,
                       object_type="contact", object_id=contact_id,
                       after={"scores": {k: v["score"] for k, v in results.items()},
                              "signals": {k: v for k, v in sig.items() if k != "consent"}})
+            _plugins.dispatch("on_scoring_computed", ctx, contact_id, results, conn)
 
     return {"contact_id": contact_id, "computed_at": int(time.time()), **results}
 

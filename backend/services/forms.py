@@ -29,6 +29,7 @@ from ..context import ServiceContext, system_context
 from ..db import db
 from .. import audit, webhooks
 from .contacts import ServiceError, _row_to_dict
+from . import plugins as _plugins  # type: ignore
 
 
 _FORM_FIELDS = ("slug", "name", "description", "schema_json",
@@ -398,14 +399,16 @@ def submit_public(slug: str, payload: dict, *,
                       "form_id": form["id"], "slug": form["slug"],
                       "contact_id": contact_id, "tags": applied_tags,
                   })
-        webhooks.enqueue(conn, "form.submitted", {
+        submission = {
             "submission_id": sid,
             "form_id": form["id"],
             "form_slug": form["slug"],
             "contact_id": contact_id,
             "tags": applied_tags,
             "payload": validated,
-        })
+        }
+        webhooks.enqueue(conn, "form.submitted", submission)
+        _plugins.dispatch("on_form_submitted", ctx, submission, conn)
 
     return {
         "submission_id": sid,
