@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>User · CRM admin</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>{{email}} <span class="muted" style="font-weight:400; margin-left:8px">#{{id}}</span></h1>
+    <span class="meta">{{display_name}} · built-in role: <code>{{role}}</code></span>
+  </div>
+
+  <div class="two-col">
+    <div>
+      <div class="card">
+        <h2>Assigned RBAC roles</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          Additive permissions on top of the built-in role.
+          See all roles + their permissions at
+          <a href="/settings/roles">Settings → Roles</a>.
+        </p>
+        <table>
+          <thead><tr><th>Role</th><th>Description</th><th></th></tr></thead>
+          <tbody>{{assigned_rows}}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Grant another role</h2>
+        <form method="post" action="/settings/users/{{id}}/grant-role">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Role</label>
+            <select name="role_id">{{grant_opts}}</select>
+          </div>
+          <div class="row"><label></label>
+            <div class="actions"><button class="btn" type="submit">Grant</button></div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Back to users</h2>
+        <p><a href="/settings/users">← All users</a></p>
+      </div>
+    </div>
+  </div>
+
+</main>
+</body>
+</html>

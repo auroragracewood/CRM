@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Users · CRM admin</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Users</h1>
+    <span class="meta">admin only · click an email to manage RBAC roles</span>
+  </div>
+
+  <div class="card">
+    <p class="muted" style="font-size:11.5px; margin-top:0">
+      Built-in role (admin/user/readonly) is enforced by the service layer
+      on every call. RBAC roles (managed in <a href="/settings/roles">Settings → Roles</a>)
+      are additive permissions per user.
+    </p>
+    <table>
+      <thead><tr>
+        <th>Email</th><th>Name</th><th>Role</th><th>Last login</th>
+      </tr></thead>
+      <tbody>{{rows}}</tbody>
+    </table>
+  </div>
+
+</main>
+</body>
+</html>

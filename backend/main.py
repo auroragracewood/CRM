@@ -165,7 +165,7 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
         '<script src="/static/modal.js" defer></script>'
         '<form method="post" action="/logout" style="display:inline">'
         f'<input type="hidden" name="csrf" value="{csrf}">'
-        f'<span class="user">{_h(sess["email"])}<span class="role">{_h(sess["role"])}</span></span> '
+        f'<a href="/me" class="user" style="text-decoration:none;color:inherit">{_h(sess["email"])}<span class="role">{_h(sess["role"])}</span></a> '
         '<button class="btn secondary" style="margin-left:10px" type="submit">Sign out</button>'
         '</form>'
         '</header>'
@@ -2177,6 +2177,352 @@ async def contact_delete_form(contact_id: int, request: Request, csrf: str = For
     except ServiceError:
         pass
     return RedirectResponse("/contacts", status_code=303)
+
+
+# ---------- user profile + admin user management + RBAC ----------
+
+@app.get("/me", response_class=HTMLResponse)
+def me_page(request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    from .services import users as users_svc
+    me = users_svc.get(ctx, sess["user_id"])
+    sessions = users_svc.list_sessions(ctx, sess["user_id"])
+    role_assignments = users_svc.list_role_assignments(ctx, sess["user_id"])
+    import time as _t
+    session_rows_parts = []
+    for s in sessions:
+        is_current = (s["id"] == sess["id"])
+        revoke_cell = (
+            f'<form method="post" action="/me/sessions/{s["id"]}/revoke" style="display:inline" '
+            f'      onsubmit="return confirm(\'Sign out this session?\');">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<button class="btn danger" style="padding:2px 8px;font-size:11px" type="submit">Revoke</button></form>'
+        ) if not is_current else "<span class='faint'>active</span>"
+        row_cls = ' class="row-deleted"' if is_current else ''
+        current_marker = '  ← this one' if is_current else ''
+        session_rows_parts.append(
+            f'<tr{row_cls}>'
+            f'<td class="mono faint">{_h(s["id"][:8])}…{current_marker}</td>'
+            f'<td class="mono faint">{_t.strftime("%Y-%m-%d %H:%M", _t.localtime(s["created_at"]))}</td>'
+            f'<td class="mono faint">{_t.strftime("%Y-%m-%d %H:%M", _t.localtime(s["last_seen_at"]))}</td>'
+            f'<td class="mono faint">{_t.strftime("%Y-%m-%d %H:%M", _t.localtime(s["expires_at"]))}</td>'
+            f'<td>{revoke_cell}</td></tr>'
+        )
+    session_rows = "".join(session_rows_parts) or '<tr><td colspan="5" class="empty">No sessions.</td></tr>'
+    role_assign_rows = "".join(
+        f'<tr><td>{_h(r["name"])}</td><td class="muted">{_h(r["description"] or "")}</td></tr>'
+        for r in role_assignments
+    ) or '<tr><td colspan="2" class="empty">No additional RBAC roles assigned.</td></tr>'
+
+    return HTMLResponse(_render(
+        "profile.html",
+        topnav=_topnav("", sess, csrf),
+        id=str(me["id"]),
+        email=_h(me["email"]),
+        display_name=_h(me.get("display_name") or ""),
+        role=_h(me["role"]),
+        session_rows=session_rows,
+        role_assign_rows=role_assign_rows,
+        csrf=csrf,
+    ))
+
+
+@app.post("/me/edit")
+async def me_edit_form(request: Request,
+                       email: str = Form(""),
+                       display_name: str = Form(""),
+                       csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    from .services import users as users_svc
+    try:
+        users_svc.update_profile(ctx, sess["user_id"],
+                                 email=email.strip() or None,
+                                 display_name=display_name.strip() or None)
+    except ServiceError as e:
+        return RedirectResponse(f"/me?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/me?info=Profile+saved", status_code=303)
+
+
+@app.post("/me/password")
+async def me_password_form(request: Request,
+                            current_password: str = Form(""),
+                            new_password: str = Form(""),
+                            csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    from .services import users as users_svc
+    try:
+        users_svc.change_password(ctx, sess["user_id"],
+                                  current_password=current_password,
+                                  new_password=new_password)
+    except ServiceError as e:
+        return RedirectResponse(f"/me?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/me?info=Password+changed", status_code=303)
+
+
+@app.post("/me/sessions/{session_id}/revoke")
+async def me_session_revoke_form(session_id: str, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    from .services import users as users_svc
+    try:
+        users_svc.revoke_session(ctx, session_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/me?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/me?info=Session+revoked", status_code=303)
+
+
+@app.get("/settings/users", response_class=HTMLResponse)
+def admin_users_page(request: Request):
+    sess = _require_session(request)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    from .services import users as users_svc
+    all_users = users_svc.list_(ctx)
+
+    rows = []
+    for u in all_users:
+        role_selector = (
+            f'<form method="post" action="/settings/users/{u["id"]}/role" style="display:inline-flex; gap:6px">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<select name="role" style="font-size:12px;padding:3px 6px">'
+            + "".join(f'<option value="{r}"{ " selected" if u["role"] == r else "" }>{r}</option>'
+                      for r in users_svc.VALID_ROLES)
+            + '</select>'
+            f'<button class="btn secondary" style="padding:3px 10px;font-size:11px" type="submit">Set</button>'
+            f'</form>'
+        )
+        rows.append(
+            f'<tr><td>#{u["id"]} <a href="/settings/users/{u["id"]}">{_h(u["email"])}</a></td>'
+            f'<td>{_h(u.get("display_name") or "—")}</td>'
+            f'<td>{role_selector}</td>'
+            f'<td class="mono faint">{_h(u.get("last_login_at") or "never")}</td></tr>'
+        )
+    rows_html = "\n".join(rows)
+    return HTMLResponse(_render(
+        "admin_users.html",
+        topnav=_topnav("settings", sess, csrf),
+        rows=rows_html,
+        csrf=csrf,
+    ))
+
+
+@app.post("/settings/users/{user_id}/role")
+async def admin_set_role_form(user_id: int, request: Request,
+                                role: str = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    from .services import users as users_svc
+    try:
+        users_svc.set_role(ctx, user_id, role)
+    except ServiceError as e:
+        return RedirectResponse(f"/settings/users?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/settings/users?info=Role+updated", status_code=303)
+
+
+@app.get("/settings/users/{user_id}", response_class=HTMLResponse)
+def admin_user_detail(user_id: int, request: Request):
+    sess = _require_session(request)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    from .services import users as users_svc, roles as roles_svc
+    u = users_svc.get(ctx, user_id)
+    assigned = users_svc.list_role_assignments(ctx, user_id)
+    all_roles = roles_svc.list_(ctx)
+    assigned_ids = {a["id"] for a in assigned}
+
+    assigned_rows = "".join(
+        f'<tr><td>{_h(r["name"])}</td><td class="muted">{_h(r["description"] or "")}</td>'
+        f'<td><form method="post" action="/settings/users/{user_id}/revoke-role" style="display:inline">'
+        f'<input type="hidden" name="csrf" value="{csrf}">'
+        f'<input type="hidden" name="role_id" value="{r["id"]}">'
+        f'<button class="btn danger" style="padding:2px 8px;font-size:11px" type="submit">Revoke</button>'
+        f'</form></td></tr>'
+        for r in assigned
+    ) or '<tr><td colspan="3" class="empty">No RBAC roles assigned yet.</td></tr>'
+
+    grantable = [r for r in all_roles if r["id"] not in assigned_ids]
+    grant_opts = "".join(
+        f'<option value="{r["id"]}">{_h(r["name"])}</option>' for r in grantable
+    ) or '<option value="">(no roles to grant)</option>'
+
+    return HTMLResponse(_render(
+        "admin_user.html",
+        topnav=_topnav("settings", sess, csrf),
+        id=str(user_id),
+        email=_h(u["email"]),
+        display_name=_h(u.get("display_name") or ""),
+        role=_h(u["role"]),
+        assigned_rows=assigned_rows,
+        grant_opts=grant_opts,
+        csrf=csrf,
+    ))
+
+
+@app.post("/settings/users/{user_id}/grant-role")
+async def admin_grant_role_form(user_id: int, request: Request,
+                                 role_id: int = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    from .services import users as users_svc
+    try:
+        users_svc.grant_role(ctx, user_id, role_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/settings/users/{user_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/settings/users/{user_id}?info=Role+granted", status_code=303)
+
+
+@app.post("/settings/users/{user_id}/revoke-role")
+async def admin_revoke_role_form(user_id: int, request: Request,
+                                  role_id: int = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    from .services import users as users_svc
+    try:
+        users_svc.revoke_role(ctx, user_id, role_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/settings/users/{user_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/settings/users/{user_id}?info=Role+revoked", status_code=303)
+
+
+@app.get("/settings/roles", response_class=HTMLResponse)
+def admin_roles_page(request: Request):
+    sess = _require_session(request)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    from .services import roles as roles_svc
+    all_roles = roles_svc.list_(ctx)
+    rows = []
+    for r in all_roles:
+        is_builtin = bool(r.get("built_in"))
+        perm_chips_parts = []
+        for p in r.get("permissions", []):
+            chip = f'<span class="task-prio prio-low" style="margin:2px;display:inline-block">{_h(p)}'
+            if not is_builtin:
+                chip += (
+                    f' <form method="post" action="/settings/roles/{r["id"]}/revoke-permission" style="display:inline">'
+                    f'<input type="hidden" name="csrf" value="{csrf}">'
+                    f'<input type="hidden" name="permission" value="{_h(p)}">'
+                    f'<button type="submit" style="background:none;border:none;color:inherit;cursor:pointer">×</button></form>'
+                )
+            chip += '</span>'
+            perm_chips_parts.append(chip)
+        perm_chips = "".join(perm_chips_parts) or '<span class="faint">no permissions</span>'
+        grant_form = "" if is_builtin else (
+            f'<form method="post" action="/settings/roles/{r["id"]}/grant-permission" '
+            f'      style="display:inline-flex; gap:4px; margin-left:6px">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<input name="permission" placeholder="e.g. contact.read" '
+            f'       style="font-size:11px;padding:2px 6px;width:160px">'
+            f'<button class="btn secondary" type="submit" style="padding:2px 8px;font-size:11px">+ grant</button>'
+            f'</form>'
+        )
+        actions = '<span class="faint">built-in</span>' if is_builtin else (
+            f'<form method="post" action="/settings/roles/{r["id"]}/delete" style="display:inline" '
+            f'      onsubmit="return confirm(\'Delete role \\\'{_h(r["name"])}\\\'? Revokes from all assigned users.\');">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<button class="btn danger" style="padding:2px 8px;font-size:11px" type="submit">Delete</button>'
+            f'</form>'
+        )
+        desc = (f' <span class="muted" style="font-size:11px">({_h(r.get("description") or "")})</span>'
+                if r.get("description") else "")
+        rows.append(
+            f'<tr><td>{_h(r["name"])}{desc}</td>'
+            f'<td>{perm_chips} {grant_form}</td>'
+            f'<td>{actions}</td></tr>'
+        )
+    rows_html = "\n".join(rows)
+    return HTMLResponse(_render(
+        "admin_roles.html",
+        topnav=_topnav("settings", sess, csrf),
+        rows=rows_html,
+        csrf=csrf,
+    ))
+
+
+@app.post("/settings/roles/new")
+async def admin_role_create_form(request: Request,
+                                  name: str = Form(""), description: str = Form(""),
+                                  csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    from .services import roles as roles_svc
+    try:
+        roles_svc.create(ctx, name, description=description.strip() or None)
+    except ServiceError as e:
+        return RedirectResponse(f"/settings/roles?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/settings/roles?info=Role+created", status_code=303)
+
+
+@app.post("/settings/roles/{role_id}/delete")
+async def admin_role_delete_form(role_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    from .services import roles as roles_svc
+    try:
+        roles_svc.delete(ctx, role_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/settings/roles?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/settings/roles?info=Role+deleted", status_code=303)
+
+
+@app.post("/settings/roles/{role_id}/grant-permission")
+async def admin_role_grant_perm_form(role_id: int, request: Request,
+                                      permission: str = Form(""), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    from .services import roles as roles_svc
+    try:
+        roles_svc.grant_permission(ctx, role_id, permission)
+    except ServiceError as e:
+        return RedirectResponse(f"/settings/roles?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/settings/roles?info=Permission+granted", status_code=303)
+
+
+@app.post("/settings/roles/{role_id}/revoke-permission")
+async def admin_role_revoke_perm_form(role_id: int, request: Request,
+                                       permission: str = Form(""), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    from .services import roles as roles_svc
+    try:
+        roles_svc.revoke_permission(ctx, role_id, permission)
+    except ServiceError as e:
+        return RedirectResponse(f"/settings/roles?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/settings/roles?info=Permission+revoked", status_code=303)
 
 
 # ---------- tags management ----------

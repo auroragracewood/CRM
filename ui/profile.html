@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>My profile · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>My profile <span class="muted" style="font-weight:400; margin-left:8px">#{{id}}</span></h1>
+    <span class="meta">role: <code>{{role}}</code></span>
+  </div>
+
+  <div class="two-col">
+
+    <div>
+      <div class="card">
+        <h2>Identity</h2>
+        <form method="post" action="/me/edit">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Email</label><input name="email" type="email" value="{{email}}"></div>
+          <div class="row"><label>Display name</label><input name="display_name" value="{{display_name}}"></div>
+          <div class="row"><label></label>
+            <div class="actions"><button class="btn" type="submit">Save profile</button></div>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Change password</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          Argon2id-hashed. Minimum 8 characters. Changing it does NOT
+          revoke your other sessions — use the table on the right for that.
+        </p>
+        <form method="post" action="/me/password">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Current password</label>
+            <input name="current_password" type="password" required></div>
+          <div class="row"><label>New password</label>
+            <input name="new_password" type="password" required minlength="8"></div>
+          <div class="row"><label></label>
+            <div class="actions"><button class="btn" type="submit">Change password</button></div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Active sessions</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          Each row is a cookie session. Revoke any that you don't recognize.
+          Your current session has 'active' instead of a revoke button.
+        </p>
+        <table>
+          <thead><tr>
+            <th>id prefix</th><th>created</th><th>last seen</th><th>expires</th><th></th>
+          </tr></thead>
+          <tbody>{{session_rows}}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>RBAC roles</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          Beyond the built-in role above, an admin can grant additive
+          permission roles to your account. These show up here.
+        </p>
+        <table>
+          <thead><tr><th>Role</th><th>Description</th></tr></thead>
+          <tbody>{{role_assign_rows}}</tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

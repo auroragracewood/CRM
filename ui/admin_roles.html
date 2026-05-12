@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roles · CRM admin</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Roles &amp; permissions</h1>
+    <span class="meta">admin only · additive permissions on top of the built-in role</span>
+  </div>
+
+  <div class="card">
+    <h2>Create a new role</h2>
+    <form class="inline-form" method="post" action="/settings/roles/new"
+          style="grid-template-columns: 1fr 2fr auto">
+      <input type="hidden" name="csrf" value="{{csrf}}">
+      <div><label>Name</label>
+        <input name="name" placeholder="e.g. content-editor" required>
+      </div>
+      <div><label>Description</label>
+        <input name="description" placeholder="what does this role allow?">
+      </div>
+      <button class="btn" type="submit">Create role</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>All roles</h2>
+    <p class="muted" style="font-size:11.5px; margin-top:0">
+      Built-in roles can't be edited or deleted. For custom roles, grant
+      permissions via the inline form on each row. Permission strings are
+      free-form action verbs (<code>contact.read</code>, <code>deal.write</code>,
+      <code>audit.read_sensitive</code>) — your service code is what makes
+      them load-bearing.
+    </p>
+    <table>
+      <thead><tr><th>Name</th><th>Permissions</th><th></th></tr></thead>
+      <tbody>{{rows}}</tbody>
+    </table>
+  </div>
+
+</main>
+</body>
+</html>
