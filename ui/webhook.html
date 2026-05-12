@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Webhook · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Webhook <span class="muted" style="font-weight:400">#{{id}}</span></h1>
+    <span class="meta">{{status}}</span>
+  </div>
+
+  <div class="two-col">
+
+    <div>
+      <div class="card">
+        <h2>Endpoint</h2>
+        <div class="row"><label>URL</label><div class="mono">{{url}}</div></div>
+        <div class="row"><label>Events</label><div class="mono" style="font-size:11.5px">{{events}}</div></div>
+        <div class="row"><label></label>
+          <div class="actions">
+            <form method="post" action="/settings/webhooks/{{id}}/toggle" style="display:inline">
+              <input type="hidden" name="csrf" value="{{csrf}}">
+              <button class="btn secondary" type="submit">Toggle active</button>
+            </form>
+            <form method="post" action="/settings/webhooks/{{id}}/delete" style="display:inline"
+                  onsubmit="return confirm('Delete this webhook subscription? Pending deliveries are dropped.');">
+              <input type="hidden" name="csrf" value="{{csrf}}">
+              <button class="btn danger" type="submit">Delete</button>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Delivery health</h2>
+        <div style="display:flex; flex-wrap:wrap; gap:6px">{{stats}}</div>
+        <p class="muted" style="font-size:11.5px; margin-top:8px">
+          Counts across the entire delivery history for this subscription.
+          Retry uses exponential backoff (30s · 2^attempts), capped at 8
+          tries. Failed deliveries can be re-queued with the ↻ retry button
+          below.
+        </p>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Recent deliveries (last 100)</h2>
+        <table>
+          <thead><tr>
+            <th>when</th><th>event</th><th>status</th><th>tries</th>
+            <th>resp</th><th>delivery_id</th><th></th>
+          </tr></thead>
+          <tbody>{{delivery_rows}}</tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

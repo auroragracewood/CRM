@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plug-in · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>{{name}} <span class="muted" style="font-weight:400">v{{version}}</span></h1>
+    <span class="meta">enabled: {{enabled}}</span>
+  </div>
+
+  <div class="two-col">
+
+    <div>
+      <div class="card">
+        <h2>Description</h2>
+        <p class="muted">{{description}}</p>
+      </div>
+
+      <div class="card">
+        <h2>Configuration</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          JSON object stored on this plug-in row. Plug-in code reads it on
+          every dispatch — no restart needed. Leave blank to clear.
+        </p>
+        <form method="post" action="/plugins/{{id}}/config">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>config_json</label>
+            <textarea name="config_json" rows="10" class="mono" style="font-size:12px">{{config_json}}</textarea>
+          </div>
+          <div class="row"><label></label>
+            <div class="actions"><button class="btn" type="submit">Save config</button></div>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Last error</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          Most recent caught exception, if any. Plug-in errors don't abort
+          the parent service transaction; they're logged here AND to
+          audit_log (action=plugin.error).
+        </p>
+        {{last_error}}
+        <form method="post" action="/plugins/{{id}}/clear-error" style="margin-top:8px">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <button class="btn secondary" type="submit" style="font-size:11.5px">Clear last-error</button>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Registered hooks</h2>
+        <table>
+          <thead><tr><th>hook</th><th>priority</th></tr></thead>
+          <tbody>{{hook_rows}}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Recent errors (last 20)</h2>
+        <table>
+          <thead><tr><th>when</th><th>detail</th></tr></thead>
+          <tbody>{{err_rows}}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Toggle</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">
+          Disabled plug-ins stay registered but their hooks don't fire.
+        </p>
+        <form method="post" action="/plugins/{{id}}/enable" style="display:inline">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <button class="btn secondary" type="submit">Enable</button>
+        </form>
+        <form method="post" action="/plugins/{{id}}/disable" style="display:inline">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <button class="btn secondary" type="submit">Disable</button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

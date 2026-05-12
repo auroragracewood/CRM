@@ -504,17 +504,47 @@ def contact_detail(contact_id: int, request: Request):
         for i in timeline
     ) or '<tr><td colspan="4" class="empty">No interactions yet.</td></tr>'
 
-    notes_html = "".join(
-        f'<div class="card" style="margin:0 0 8px 0; padding:10px 12px">'
-        f'<div class="row-flex" style="margin-bottom:4px">'
-        f'<span class="label-uppercase" style="color: {"var(--copper)" if n.get("visibility")=="private" else "var(--fg-muted)"}">{_h(n.get("visibility"))}</span>'
-        f'<span class="spacer"></span>'
-        f'<span class="muted mono" style="font-size:11px">{_h(n.get("created_at"))}</span>'
-        f'</div>'
-        f'<div>{("<em class=&#34;faint&#34;>private — body redacted</em>" if n.get("_private_redacted") else _h(n.get("body") or ""))}</div>'
-        f'</div>'
-        for n in notes_list
-    ) or '<div class="empty" style="padding:14px">No notes yet.</div>'
+    # Was a reveal just performed? Show the body of that one note unredacted.
+    just_revealed = request.query_params.get("reveal", "")
+    just_revealed_id = int(just_revealed) if just_revealed.isdigit() else 0
+
+    def _note_card(n):
+        is_redacted = bool(n.get("_private_redacted"))
+        is_just_revealed = (n.get("id") == just_revealed_id)
+        body_html = (
+            f'<em class="faint">private — body redacted</em>'
+            if is_redacted and not is_just_revealed
+            else _h(n.get("body") or "")
+        )
+        reveal_btn = ""
+        if is_redacted and not is_just_revealed and sess["role"] == "admin":
+            reveal_btn = (
+                f'<form method="post" action="/notes/{n["id"]}/reveal" style="display:inline">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<input type="hidden" name="contact_id" value="{contact["id"]}">'
+                f'<button class="btn secondary" style="padding:2px 10px;font-size:10.5px"'
+                f'        onclick="return confirm(&#39;Reveal this private note? The reveal is audited.&#39;);">'
+                f'  Reveal (audited)</button></form>'
+            )
+        revealed_pill = (
+            ' <span class="task-prio prio-high" style="margin-left:6px">just revealed (audited)</span>'
+            if is_just_revealed else ""
+        )
+        return (
+            f'<div class="card" style="margin:0 0 8px 0; padding:10px 12px">'
+            f'<div class="row-flex" style="margin-bottom:4px">'
+            f'<span class="label-uppercase" style="color: {"var(--copper)" if n.get("visibility")=="private" else "var(--fg-muted)"}">{_h(n.get("visibility"))}</span>'
+            f'{revealed_pill}'
+            f'<span class="spacer"></span>'
+            f'<span class="muted mono" style="font-size:11px">{_h(n.get("created_at"))}</span>'
+            f'</div>'
+            f'<div>{body_html}</div>'
+            + (f'<div style="margin-top:6px">{reveal_btn}</div>' if reveal_btn else "")
+            + f'</div>'
+        )
+
+    notes_html = "".join(_note_card(n) for n in notes_list) or \
+                 '<div class="empty" style="padding:14px">No notes yet.</div>'
 
     # Portal tokens block — shows existing tokens + a "issue new" form. If
     # ?portal_token=<raw> just arrived (after issuance), highlight the new URL.
@@ -1956,6 +1986,226 @@ async def contact_delete_form(contact_id: int, request: Request, csrf: str = For
     return RedirectResponse("/contacts", status_code=303)
 
 
+# ---------- settings: webhook delivery log + retry + delete ----------
+
+@app.get("/settings/webhooks/{webhook_id}", response_class=HTMLResponse)
+def webhook_detail(webhook_id: int, request: Request):
+    sess = _require_session(request)
+    if sess["role"] != "admin":
+        raise HTTPException(status_code=403, detail="admin only")
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    import time as _t
+    with db() as conn:
+        wh = conn.execute("SELECT * FROM webhooks WHERE id=?", (webhook_id,)).fetchone()
+        if not wh:
+            raise HTTPException(404, "webhook not found")
+        wh = dict(wh)
+        deliveries = conn.execute(
+            "SELECT id, event_type, status, attempts, response_status, "
+            "       next_attempt_at, created_at, delivery_id "
+            "FROM webhook_events WHERE webhook_id=? ORDER BY id DESC LIMIT 100",
+            (webhook_id,),
+        ).fetchall()
+        counts = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM webhook_events "
+            "WHERE webhook_id=? GROUP BY status",
+            (webhook_id,),
+        ).fetchall()
+
+    counts_map = {r["status"]: r["n"] for r in counts}
+    stat_pill = lambda label, key, color: (
+        f'<span class="task-prio prio-{color}" style="margin-right:6px">'
+        f'{counts_map.get(key, 0)} {label}</span>'
+    )
+    stats_html = (
+        stat_pill("pending", "pending", "low")
+        + stat_pill("retrying", "retrying", "high")
+        + stat_pill("delivered", "delivered", "normal")
+        + stat_pill("failed", "failed", "urgent")
+    )
+
+    delivery_rows = "".join(
+        f'<tr><td class="mono faint">{_t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(d["created_at"]))}</td>'
+        f'<td class="mono">{_h(d["event_type"])}</td>'
+        f'<td>{_h(d["status"])}</td>'
+        f'<td class="mono">{d["attempts"] or 0}</td>'
+        f'<td class="mono faint">{_h(d["response_status"] or "—")}</td>'
+        f'<td class="mono faint" style="font-size:10.5px">{_h(d["delivery_id"] or "")}</td>'
+        f'<td>'
+        + (
+            f'<form method="post" action="/webhook-events/{d["id"]}/retry" style="display:inline">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<button class="btn secondary" style="padding:2px 8px;font-size:11px">↻ retry</button></form>'
+            if d["status"] in ("failed", "retrying") else ""
+        )
+        + '</td></tr>'
+        for d in deliveries
+    ) or '<tr><td colspan="7" class="empty">No deliveries logged yet.</td></tr>'
+
+    return HTMLResponse(_render(
+        "webhook.html",
+        topnav=_topnav("settings", sess, csrf),
+        id=str(webhook_id),
+        url=_h(wh["url"]),
+        events=_h(wh.get("events_json") or ""),
+        status=("active" if wh.get("active") else "paused"),
+        stats=stats_html,
+        delivery_rows=delivery_rows,
+        csrf=csrf,
+    ))
+
+
+@app.post("/settings/webhooks/{webhook_id}/delete")
+async def webhook_delete_form(webhook_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    with db() as conn:
+        conn.execute("DELETE FROM webhooks WHERE id=?", (webhook_id,))
+    return RedirectResponse("/settings?info=Webhook+deleted", status_code=303)
+
+
+@app.post("/settings/webhooks/{webhook_id}/toggle")
+async def webhook_toggle_form(webhook_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    with db() as conn:
+        conn.execute(
+            "UPDATE webhooks SET active = CASE active WHEN 1 THEN 0 ELSE 1 END WHERE id=?",
+            (webhook_id,),
+        )
+    return RedirectResponse(f"/settings/webhooks/{webhook_id}", status_code=303)
+
+
+@app.post("/webhook-events/{event_id}/retry")
+async def webhook_event_retry(event_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    import time as _t
+    with db() as conn:
+        row = conn.execute("SELECT webhook_id FROM webhook_events WHERE id=?",
+                           (event_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "delivery not found")
+        conn.execute(
+            "UPDATE webhook_events SET status='pending', attempts=0, "
+            "  next_attempt_at=?, response_status=NULL, response_body=NULL "
+            "WHERE id=?",
+            (int(_t.time()), event_id),
+        )
+        wh_id = row["webhook_id"]
+    return RedirectResponse(f"/settings/webhooks/{wh_id}?info=Delivery+re-queued",
+                            status_code=303)
+
+
+# ---------- plug-in detail / config editor ----------
+
+@app.get("/plugins/{plugin_id}", response_class=HTMLResponse)
+def plugin_detail(plugin_id: int, request: Request):
+    sess = _require_session(request)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    import time as _t
+    with db() as conn:
+        p = conn.execute("SELECT * FROM plugins WHERE id=?", (plugin_id,)).fetchone()
+        if not p:
+            raise HTTPException(404, "plugin not found")
+        p = dict(p)
+        hooks = conn.execute(
+            "SELECT hook_name, priority FROM plugin_hooks WHERE plugin_id=? "
+            "ORDER BY hook_name", (plugin_id,)
+        ).fetchall()
+        recent_errors = conn.execute(
+            "SELECT ts, before_json FROM audit_log "
+            "WHERE action='plugin.error' AND object_id=? "
+            "ORDER BY ts DESC LIMIT 20",
+            (plugin_id,),
+        ).fetchall()
+
+    hook_rows = "".join(
+        f'<tr><td class="mono">{_h(h["hook_name"])}</td>'
+        f'<td class="mono">{h["priority"]}</td></tr>'
+        for h in hooks
+    ) or '<tr><td colspan="2" class="empty">No hooks registered.</td></tr>'
+
+    err_rows = "".join(
+        f'<tr><td class="mono faint">{_t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(r["ts"]))}</td>'
+        f'<td class="mono" style="font-size:11px">{_h(r["before_json"] or "")[:300]}</td></tr>'
+        for r in recent_errors
+    ) or '<tr><td colspan="2" class="empty">No recent errors. 🎉</td></tr>'
+
+    return HTMLResponse(_render(
+        "plugin.html",
+        topnav=_topnav("plugins", sess, csrf),
+        id=str(plugin_id),
+        name=_h(p["name"]),
+        version=_h(p.get("version") or ""),
+        description=_h(p.get("description") or ""),
+        enabled=("yes" if p.get("enabled") else "no"),
+        config_json=_h(p.get("config_json") or ""),
+        last_error=_h(p.get("last_error") or ""),
+        hook_rows=hook_rows,
+        err_rows=err_rows,
+        csrf=csrf,
+    ))
+
+
+@app.post("/plugins/{plugin_id}/config")
+async def plugin_config_form(plugin_id: int, request: Request,
+                              config_json: str = Form(""), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    import json as _json
+    try:
+        # Validate it's parseable JSON (or empty)
+        if config_json.strip():
+            _json.loads(config_json)
+        with db() as conn:
+            conn.execute("UPDATE plugins SET config_json=? WHERE id=?",
+                         (config_json.strip() or None, plugin_id))
+    except _json.JSONDecodeError as e:
+        return RedirectResponse(
+            f"/plugins/{plugin_id}?error=Invalid+JSON:+{_h(str(e))}",
+            status_code=303,
+        )
+    return RedirectResponse(f"/plugins/{plugin_id}?info=Config+saved",
+                            status_code=303)
+
+
+@app.post("/plugins/{plugin_id}/clear-error")
+async def plugin_clear_error_form(plugin_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    with db() as conn:
+        conn.execute("UPDATE plugins SET last_error=NULL WHERE id=?", (plugin_id,))
+    return RedirectResponse(f"/plugins/{plugin_id}?info=Error+cleared", status_code=303)
+
+
+# ---------- private note reveal (UI wrapper around notes.reveal_private) ----------
+
+@app.post("/notes/{note_id}/reveal")
+async def note_reveal_form(note_id: int, request: Request,
+                            contact_id: int = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        notes_service.reveal_private(ctx, note_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/contacts/{contact_id}?error={_h(e.message)}",
+                                status_code=303)
+    return RedirectResponse(f"/contacts/{contact_id}?reveal={note_id}",
+                            status_code=303)
+
+
 # ---------- settings: API keys ----------
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -1989,7 +2239,7 @@ def settings_page(request: Request, created_key: str = ""):
     ) or '<tr><td colspan="5" class="empty">No API keys yet.</td></tr>'
 
     wh_rows = "".join(
-        f'<tr><td class="mono">{_h(w["url"])}</td>'
+        f'<tr><td class="mono"><a href="/settings/webhooks/{w["id"]}">{_h(w["url"])}</a></td>'
         f'<td>{_h(w["events_json"])}</td>'
         f'<td>{_h("active" if w["active"] else "paused")}</td>'
         '</tr>'
@@ -2575,7 +2825,7 @@ def plugins_page(request: Request, reloaded: str = ""):
                 f'<pre style="font-size:10.5px">{_h(p["last_error"][:1500])}</pre></details>'
             )
         rows.append(
-            f'<tr><td><strong>{_h(p["name"])}</strong>'
+            f'<tr><td><strong><a href="/plugins/{p["id"]}">{_h(p["name"])}</a></strong>'
             f'  <div class="muted" style="font-size:11px">v{_h(p.get("version") or "?")} · {_h(p.get("description") or "")}</div></td>'
             f'<td>{status_pill}<br>{loaded_pill}</td>'
             f'<td class="mono" style="font-size:11px">{hook_list}{last_err}</td>'

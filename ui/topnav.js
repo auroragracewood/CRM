@@ -1,3 +1,37 @@
+/* Flash banner reader — shows ?error= or ?info= as a banner at top of
+ * <main>, then strips it from the URL so refreshing doesn't re-show.
+ * Lives in topnav.js because that script loads on every page.
+ */
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const err = params.get('error');
+  const info = params.get('info');
+  if (!err && !info) return;
+  const main = document.querySelector('main.content');
+  if (!main) return;
+  const cls = err ? 'error' : 'success';
+  const text = err || info;
+  const banner = document.createElement('div');
+  banner.className = 'flash ' + cls;
+  const dismiss = document.createElement('a');
+  dismiss.href = '#';
+  dismiss.className = 'dismiss';
+  dismiss.setAttribute('aria-label', 'dismiss');
+  dismiss.textContent = '×';
+  dismiss.addEventListener('click', e => { e.preventDefault(); banner.remove(); });
+  banner.appendChild(dismiss);
+  banner.appendChild(document.createTextNode(text));
+  main.insertBefore(banner, main.firstChild);
+  // Strip from URL without reloading
+  params.delete('error');
+  params.delete('info');
+  const newUrl = window.location.pathname +
+                 (params.toString() ? '?' + params.toString() : '') +
+                 window.location.hash;
+  window.history.replaceState(null, '', newUrl);
+})();
+
+
 /* Topnav global search.
  *
  * Reads the input inside .topsearch, debounces 150ms, hits /api/search,
