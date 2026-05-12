@@ -51,6 +51,44 @@ app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=str(UI_DIR)), name="static")
 
 
+# ---------- one-shot flash for issued portal tokens (security) ----------
+#
+# Raw portal tokens MUST NOT travel in URLs. Putting them in the
+# `?portal_token=` query param leaks credentials into browser history,
+# access logs, screenshots, and referer headers. Instead, the POST handler
+# stashes the raw token here, the GET handler pops it once, and the URL
+# the user sees is just `/contacts/{id}`. TTL is short — if the user
+# doesn't load the contact page within 120 seconds they need to re-issue
+# (preferable to a long-lived leak surface).
+#
+# Single-process design: this dict lives in the uvicorn worker. The
+# deploy guide already pins workers=1; multi-worker would need an
+# external store (sqlite + ttl, or a flash-via-cookie pattern).
+
+import time as _time
+
+_PORTAL_TOKEN_FLASH: dict[tuple[int, int], tuple[str, float]] = {}
+_PORTAL_TOKEN_FLASH_TTL = 120  # seconds
+
+
+def _flash_portal_token(user_id: int, contact_id: int, raw_token: str) -> None:
+    _PORTAL_TOKEN_FLASH[(user_id, contact_id)] = (
+        raw_token, _time.time() + _PORTAL_TOKEN_FLASH_TTL,
+    )
+
+
+def _pop_portal_token(user_id: int, contact_id: int) -> str:
+    """Return the freshly-issued token once, then drop it. Empty string if none."""
+    key = (user_id, contact_id)
+    entry = _PORTAL_TOKEN_FLASH.pop(key, None)
+    if not entry:
+        return ""
+    raw, exp = entry
+    if _time.time() > exp:
+        return ""
+    return raw
+
+
 # ---------- helpers ----------
 
 def _tpl(name: str) -> str:
@@ -352,9 +390,12 @@ async def contacts_create_form(
 
 
 @app.get("/contacts/{contact_id}", response_class=HTMLResponse)
-def contact_detail(contact_id: int, request: Request, portal_token: str = ""):
+def contact_detail(contact_id: int, request: Request):
     sess = _require_session(request)
     ctx = _ctx_from_session(sess)
+    # If we just issued a portal token for this contact, the raw token
+    # is in the one-shot in-process flash (NOT the URL). Pop it once.
+    portal_token = _pop_portal_token(sess["user_id"], contact_id)
     try:
         contact = contacts_service.get(ctx, contact_id)
     except ServiceError as e:
@@ -1944,7 +1985,10 @@ async def contact_issue_portal_token(
                                     expires_in_days=eid)
     except ServiceError as e:
         return RedirectResponse(f"/contacts/{contact_id}?error={_h(e.message)}", status_code=303)
-    return RedirectResponse(f"/contacts/{contact_id}?portal_token={tok['token']}", status_code=303)
+    # Stash raw token in the one-shot flash; redirect with a CLEAN URL.
+    # The contact page reads from the flash and shows the link once.
+    _flash_portal_token(sess["user_id"], contact_id, tok["token"])
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
 
 
 @app.post("/portal-tokens/{token_id}/revoke")

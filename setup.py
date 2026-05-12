@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from backend import auth as auth_mod  # noqa: E402
+from backend import migrations as migrations_runner  # noqa: E402
 from backend.db import DB_PATH, applied_versions, apply_schema, db  # noqa: E402
 
 
@@ -66,6 +67,14 @@ def main():
     print("Applying schema.sql ...")
     apply_schema(schema_sql)
     print(f"  ok, versions now: {applied_versions()}")
+
+    # 1b. Apply pending migrations (v1 → v4.1, and any future ones)
+    print("Applying pending migrations ...")
+    ran = migrations_runner.run_pending(verbose=True)
+    if ran:
+        print(f"  applied {len(ran)} migration(s): {ran}")
+    else:
+        print("  no pending migrations")
 
     # 2. Collect admin credentials
     if args.non_interactive:
