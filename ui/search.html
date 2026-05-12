@@ -4,6 +4,21 @@
 <meta charset="utf-8">
 <title>Search · CRM</title>
 <link rel="stylesheet" href="/static/styles.css">
+<style>
+  .searchbar-live {
+    display: flex; gap: 8px; align-items: center;
+    margin: 0 0 14px 0;
+  }
+  .searchbar-live input {
+    flex: 1; padding: 10px 12px; font-size: 14px;
+  }
+  .searchbar-live .meta {
+    font-size: 12px; color: var(--fg-muted, #777); white-space: nowrap;
+  }
+  #results mark {
+    background: #fff5b1; padding: 0 2px; border-radius: 2px;
+  }
+</style>
 </head>
 <body>
 {{topnav}}
@@ -11,11 +26,140 @@
 
   <div class="pagebar">
     <h1>Search</h1>
-    <span class="meta">{{total}} hit(s) for <code>{{q}}</code></span>
+    <span class="meta" id="result-meta">{{total}} hit(s) for <code>{{q}}</code></span>
   </div>
 
-  {{buckets}}
+  <div class="searchbar-live">
+    <input id="q" type="search" value="{{q}}"
+           placeholder="Type to search across contacts, companies, interactions, notes…"
+           autofocus autocomplete="off">
+    <span class="meta" id="status"></span>
+  </div>
+
+  <div id="results">{{buckets}}</div>
 
 </main>
+
+<script>
+(function () {
+  const input = document.getElementById('q');
+  const results = document.getElementById('results');
+  const meta = document.getElementById('result-meta');
+  const status = document.getElementById('status');
+
+  const BUCKET_ORDER = [
+    ['contact',     'Contacts'],
+    ['company',     'Companies'],
+    ['interaction', 'Interactions'],
+    ['note',        'Notes'],
+  ];
+
+  let inflight = null;     // AbortController of latest in-flight request
+  let timer = null;
+  let lastQuery = input.value;
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => (
+      {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+    ));
+  }
+
+  // The server already returns title/body wrapped in <mark>...</mark>.
+  // We can render them as-is BUT must escape everything else around them
+  // first. Easiest: trust only `<mark>` and `</mark>` tags from the server,
+  // escape everything else. Server snippets are FTS5 output, no user-
+  // injected HTML.
+  function renderSnippet(s) {
+    if (!s) return '';
+    return escapeHtml(s)
+      .replace(/&lt;mark&gt;/g, '<mark>')
+      .replace(/&lt;\/mark&gt;/g, '</mark>');
+  }
+
+  function bucketHtml(label, hits) {
+    if (!hits || hits.length === 0) return '';
+    const rows = hits.map(h => (
+      `<tr>
+         <td><a href="${escapeHtml(h.url || '#')}">${escapeHtml(h.label || '(untitled)')}</a></td>
+         <td class="muted" style="font-size:11.5px">${renderSnippet(h.title)}</td>
+         <td class="muted" style="font-size:11.5px">${renderSnippet(h.body)}</td>
+       </tr>`
+    )).join('');
+    return (
+      `<div class="card">
+         <h2>${escapeHtml(label)} <span class="muted">— ${hits.length}</span></h2>
+         <table><tbody>${rows}</tbody></table>
+       </div>`
+    );
+  }
+
+  function renderEmpty(q) {
+    if (!q.trim()) {
+      return '<div class="empty" style="padding:30px">Type a query above to search.</div>';
+    }
+    return `<div class="empty" style="padding:30px">No matches for <code>${escapeHtml(q)}</code>.</div>`;
+  }
+
+  function render(json, q) {
+    const buckets = json.buckets || {};
+    const html = BUCKET_ORDER
+      .map(([key, label]) => bucketHtml(label, buckets[key] || []))
+      .filter(Boolean)
+      .join('\n');
+    results.innerHTML = html || renderEmpty(q);
+    meta.innerHTML = `${json.total || 0} hit(s) for <code>${escapeHtml(q)}</code>`;
+  }
+
+  async function doSearch(q) {
+    if (q === lastQuery) return;
+    lastQuery = q;
+
+    // Sync the URL so bookmarking + refresh still works.
+    const url = new URL(window.location);
+    if (q) url.searchParams.set('q', q);
+    else   url.searchParams.delete('q');
+    window.history.replaceState(null, '', url);
+
+    if (!q.trim()) {
+      results.innerHTML = renderEmpty('');
+      meta.innerHTML = `0 hit(s) for <code></code>`;
+      status.textContent = '';
+      return;
+    }
+
+    if (inflight) inflight.abort();
+    inflight = new AbortController();
+    status.textContent = 'searching…';
+
+    try {
+      const resp = await fetch(
+        '/api/search?q=' + encodeURIComponent(q) + '&limit=50',
+        { credentials: 'same-origin', signal: inflight.signal },
+      );
+      if (!resp.ok) {
+        status.textContent = 'error ' + resp.status;
+        return;
+      }
+      const json = await resp.json();
+      render(json, q);
+      status.textContent = '';
+    } catch (err) {
+      if (err.name !== 'AbortError') status.textContent = 'error';
+    }
+  }
+
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value;
+    timer = setTimeout(() => doSearch(q), 180);
+  });
+
+  // Trigger one search if landed on the page with ?q= in the URL.
+  if (input.value.trim()) {
+    // The server already rendered initial results; only re-fetch if the
+    // user has edited the box since render. Skip otherwise.
+  }
+})();
+</script>
 </body>
 </html>
