@@ -161,6 +161,7 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
         '<input type="search" name="q" placeholder="Search contacts, companies, notes…" autocomplete="off">'
         '</form>'
         '<script src="/static/topnav.js" defer></script>'
+        '<script src="/static/modal.js" defer></script>'
         '<form method="post" action="/logout" style="display:inline">'
         f'<input type="hidden" name="csrf" value="{csrf}">'
         f'<span class="user">{_h(sess["email"])}<span class="role">{_h(sess["role"])}</span></span> '
