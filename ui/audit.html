@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Audit log · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Audit log <span class="muted" style="font-weight:400; font-size:13px">admin only</span></h1>
+    <span class="meta">{{total}} matching entries</span>
+  </div>
+
+  <div class="card">
+    <p class="muted" style="font-size:11.5px; margin-top:0">
+      Every service-layer mutation lands here, inside the same SQLite transaction
+      as the data change. Logs are append-only; this view is read-only. Filter on
+      any combination of fields below — leave blank to skip a filter.
+    </p>
+    <form method="get" action="/audit" class="inline-form"
+          style="grid-template-columns: repeat(3, 1fr); gap: 10px">
+      <div><label>Object type</label>
+        <input name="object_type" value="{{f_object_type}}"
+               placeholder="contact / deal / task / …">
+      </div>
+      <div><label>Object id</label>
+        <input name="object_id" value="{{f_object_id}}" placeholder="e.g. 42">
+      </div>
+      <div><label>Action (substring)</label>
+        <input name="action" value="{{f_action}}" placeholder="e.g. .created">
+      </div>
+      <div><label>Surface</label>
+        <input name="surface" value="{{f_surface}}"
+               placeholder="ui / rest / cli / mcp / cron / plugin / webhook / system">
+      </div>
+      <div><label>User id</label>
+        <input name="user_id" value="{{f_user_id}}" placeholder="e.g. 1">
+      </div>
+      <div><label>Request id</label>
+        <input name="request_id" value="{{f_request_id}}" placeholder="UUID">
+      </div>
+      <div style="grid-column: 1 / -1">
+        <button class="btn" type="submit">Apply filters</button>
+        <a href="/audit" class="btn secondary" style="margin-left:6px">Clear</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr>
+        <th>when</th><th>action</th><th>object</th>
+        <th>surface</th><th>by</th><th>request_id</th>
+      </tr></thead>
+      <tbody>{{rows}}</tbody>
+    </table>
+    <div style="margin-top:10px; display:flex; gap:10px; justify-content:space-between; font-size:12px">
+      <span class="muted">showing rows {{offset}}–({{offset}}+{{limit}})</span>
+      <span>{{prev_link}} &nbsp; {{next_link}}</span>
+    </div>
+  </div>
+
+</main>
+</body>
+</html>

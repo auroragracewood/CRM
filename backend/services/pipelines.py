@@ -116,6 +116,20 @@ def archive_pipeline(ctx: ServiceContext, pipeline_id: int) -> dict:
     return {"id": pipeline_id, "archived": True}
 
 
+def unarchive_pipeline(ctx: ServiceContext, pipeline_id: int) -> dict:
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    now = int(time.time())
+    with db() as conn:
+        conn.execute(
+            "UPDATE pipelines SET archived=0, updated_at=? WHERE id=?",
+            (now, pipeline_id),
+        )
+        audit.log(conn, ctx, action="pipeline.unarchived", object_type="pipeline",
+                  object_id=pipeline_id)
+    return {"id": pipeline_id, "archived": False}
+
+
 # Common pipeline templates (referenced by setup-style seeding or CLI).
 TEMPLATES = {
     "sales": [

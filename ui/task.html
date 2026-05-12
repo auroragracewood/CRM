@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Task · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>{{title}}<span class="muted" style="font-weight:400; margin-left:8px">#{{id}}</span></h1>
+    <span class="meta">
+      <span class="task-prio prio-{{priority}}">{{priority}}</span>
+      <span class="muted" style="margin-left:8px">{{status}}</span>
+    </span>
+  </div>
+
+  <div class="two-col">
+
+    <div>
+      <div class="card">
+        <h2>Quick action</h2>
+        {{toggle_block}}
+      </div>
+
+      <div class="card">
+        <h2>Edit</h2>
+        <form method="post" action="/tasks/{{id}}/edit">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Title</label><input name="title" value="{{title}}"></div>
+          <div class="row"><label>Description</label>
+            <textarea name="description" rows="3">{{description}}</textarea>
+          </div>
+          <div class="row"><label>Priority</label>
+            <select name="priority">{{priority_opts}}</select>
+          </div>
+          <div class="row"><label>Status</label>
+            <select name="status">{{status_opts}}</select>
+            <span class="muted" style="font-size:11px">Moving INTO 'done' stamps completed_at; OUT of 'done' clears it.</span>
+          </div>
+          <div class="row"><label>Due date</label>
+            <input name="due_date" value="{{due_date}}" placeholder="2026-12-31">
+          </div>
+          <div class="row"><label></label>
+            <div class="actions"><button class="btn" type="submit">Save changes</button></div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Linked to</h2>
+        <div class="row"><label>Contact</label><div>{{contact_link}}</div></div>
+        <div class="row"><label>Company</label><div>{{company_link}}</div></div>
+        <div class="row"><label>Deal</label><div>{{deal_link}}</div></div>
+      </div>
+
+      <div class="card">
+        <h2>History</h2>
+        <table>
+          <thead><tr><th>when</th><th>action</th><th>surface</th><th>by</th></tr></thead>
+          <tbody>{{audit_rows}}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Danger zone</h2>
+        <p class="muted" style="font-size:12px; margin-top:0">Hard-deletes the task. Not reversible.</p>
+        <form method="post" action="/tasks/{{id}}/delete"
+              onsubmit="return confirm('Delete this task?');">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <button class="btn danger" type="submit">Delete task</button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

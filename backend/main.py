@@ -145,6 +145,7 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
              ("Reports", "/reports", "reports"),
              ("Connectors", "/connectors", "connectors"),
              ("Plug-ins", "/plugins", "plugins"),
+             ("Audit", "/audit", "audit"),
              ("Settings", "/settings", "settings")]
     links = "".join(
         f'<a href="{href}"{"class=active" if key == active else ""}>{label}</a>'.replace(
@@ -339,28 +340,56 @@ def dashboard(request: Request):
 
 # ---------- contacts ----------
 
+def _show_deleted_toggle(show_del: bool, base: str, q: str) -> str:
+    """Render the 'Show deleted' / 'Hide deleted' link for list pages."""
+    from urllib.parse import urlencode
+    if show_del:
+        href = base + (("?" + urlencode({"q": q})) if q else "")
+        return f'<a href="{href}" class="btn secondary" style="padding:3px 10px;font-size:11px">Hide deleted</a>'
+    qs = {"show_deleted": "1"}
+    if q: qs["q"] = q
+    href = base + "?" + urlencode(qs)
+    return f'<a href="{href}" class="btn secondary" style="padding:3px 10px;font-size:11px">Show deleted</a>'
+
+
 @app.get("/contacts", response_class=HTMLResponse)
-def contacts_page(request: Request, q: str = ""):
+def contacts_page(request: Request, q: str = "", show_deleted: int = 0):
     sess = _require_session(request)
     ctx = _ctx_from_session(sess)
-    result = contacts_service.list_(ctx, limit=200, offset=0, q=q or None)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    show_del = bool(show_deleted)
+    result = contacts_service.list_(ctx, limit=200, offset=0, q=q or None,
+                                    include_deleted=show_del)
     rows = []
     for c in result["items"]:
         label = c.get("full_name") or c.get("email") or f"#{c['id']}"
+        is_deleted = bool(c.get("deleted_at"))
+        if is_deleted:
+            restore_btn = (
+                f'<form method="post" action="/contacts/{c["id"]}/restore" style="display:inline">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<button class="btn secondary" style="padding:2px 8px">↩ restore</button></form>'
+            )
+            row_cls = ' class="row-deleted"'
+            name_cell = f'<a href="/contacts/{c["id"]}">{_h(label)}</a> <span class="faint">(deleted)</span>'
+        else:
+            restore_btn = ""
+            row_cls = ""
+            name_cell = f'<a href="/contacts/{c["id"]}">{_h(label)}</a>'
         rows.append(
-            f'<tr><td><a href="/contacts/{c["id"]}">{_h(label)}</a></td>'
+            f'<tr{row_cls}><td>{name_cell}</td>'
             f'<td>{_h(c.get("email") or "")}</td>'
             f'<td>{_h(c.get("phone") or "")}</td>'
-            f'<td>{_h(c.get("title") or "")}</td></tr>'
+            f'<td>{_h(c.get("title") or "")} {restore_btn}</td></tr>'
         )
     rows_html = "\n".join(rows) or '<tr><td colspan="4" class="empty">No contacts yet. Add one below.</td></tr>'
-    csrf = auth_mod.csrf_token_for(sess["id"])
     return HTMLResponse(_render(
         "contacts.html",
         topnav=_topnav("contacts", sess, csrf),
         rows=rows_html,
         total=str(result["total"]),
         q=_h(q),
+        show_deleted_toggle=_show_deleted_toggle(show_del, "/contacts", q),
         csrf=csrf,
     ))
 
@@ -634,26 +663,43 @@ async def contact_add_note(
 # ---------- companies ----------
 
 @app.get("/companies", response_class=HTMLResponse)
-def companies_page(request: Request, q: str = ""):
+def companies_page(request: Request, q: str = "", show_deleted: int = 0):
     sess = _require_session(request)
     ctx = _ctx_from_session(sess)
-    result = companies_service.list_(ctx, limit=200, offset=0, q=q or None)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    show_del = bool(show_deleted)
+    result = companies_service.list_(ctx, limit=200, offset=0, q=q or None,
+                                     include_deleted=show_del)
     rows = []
     for c in result["items"]:
+        label = c.get("name") or f"#{c['id']}"
+        is_deleted = bool(c.get("deleted_at"))
+        if is_deleted:
+            restore_btn = (
+                f'<form method="post" action="/companies/{c["id"]}/restore" style="display:inline">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<button class="btn secondary" style="padding:2px 8px">↩ restore</button></form>'
+            )
+            row_cls = ' class="row-deleted"'
+            name_cell = f'<a href="/companies/{c["id"]}">{_h(label)}</a> <span class="faint">(deleted)</span>'
+        else:
+            restore_btn = ""
+            row_cls = ""
+            name_cell = f'<a href="/companies/{c["id"]}">{_h(label)}</a>'
         rows.append(
-            f'<tr><td><a href="/companies/{c["id"]}">{_h(c.get("name") or f"#{c[chr(39)+chr(105)+chr(100)+chr(39)]}")}</a></td>'
+            f'<tr{row_cls}><td>{name_cell}</td>'
             f'<td>{_h(c.get("domain") or "")}</td>'
             f'<td>{_h(c.get("industry") or "")}</td>'
-            f'<td>{_h(c.get("location") or "")}</td></tr>'
+            f'<td>{_h(c.get("location") or "")} {restore_btn}</td></tr>'
         )
     rows_html = "\n".join(rows) or '<tr><td colspan="4" class="empty">No companies yet. Add one below.</td></tr>'
-    csrf = auth_mod.csrf_token_for(sess["id"])
     return HTMLResponse(_render(
         "companies.html",
         topnav=_topnav("companies", sess, csrf),
         rows=rows_html,
         total=str(result["total"]),
         q=_h(q),
+        show_deleted_toggle=_show_deleted_toggle(show_del, "/companies", q),
         csrf=csrf,
     ))
 
@@ -767,7 +813,7 @@ def _deal_card_html(deal: dict, csrf: str, stages: list[dict]) -> str:
     )
     return (
         f'<div class="deal-card" data-deal-id="{deal["id"]}">'
-        f'  <div class="deal-title">{_h(deal["title"])}</div>'
+        f'  <div class="deal-title"><a href="/deals/{deal["id"]}">{_h(deal["title"])}</a></div>'
         f'  {value_str}'
         f'  <div class="deal-meta">'
         f'    <span class="deal-status status-{_h(deal["status"])}">{_h(deal["status"])}</span> '
@@ -782,24 +828,48 @@ def _deal_card_html(deal: dict, csrf: str, stages: list[dict]) -> str:
 
 
 @app.get("/pipelines", response_class=HTMLResponse)
-def pipelines_page(request: Request, pipeline_id: int = 0):
+def pipelines_page(request: Request, pipeline_id: int = 0,
+                   include_archived: int = 0):
     sess = _require_session(request)
     ctx = _ctx_from_session(sess)
-    pipelines_list = pipelines_service.list_pipelines(ctx)
+    inc_arch = bool(include_archived)
+    pipelines_list = pipelines_service.list_pipelines(ctx, include_archived=inc_arch)
     csrf = auth_mod.csrf_token_for(sess["id"])
 
-    # Pipeline selector strip
+    # Pipeline selector strip with per-pipeline archive/unarchive button
     if pipelines_list:
         if not pipeline_id:
-            pipeline_id = pipelines_list[0]["id"]
-        selector = "".join(
-            f'<a href="/pipelines?pipeline_id={p["id"]}"'
-            f'   class="pipeline-chip{" active" if p["id"] == pipeline_id else ""}">'
-            f'{_h(p["name"])}'
-            f'   <span class="muted">· {_h(p["type"])}</span>'
-            f'</a>'
-            for p in pipelines_list
+            # Prefer first non-archived
+            non_arch = [p for p in pipelines_list if not p.get("archived")]
+            pipeline_id = (non_arch or pipelines_list)[0]["id"]
+        chips = []
+        for p in pipelines_list:
+            arch_cls = " archived" if p.get("archived") else ""
+            active_cls = " active" if p["id"] == pipeline_id else ""
+            arch_btn_action = "unarchive" if p.get("archived") else "archive"
+            arch_btn_label = "↩ unarchive" if p.get("archived") else "× archive"
+            confirm_text = (f"Unarchive pipeline '{p['name']}'?"
+                            if p.get("archived")
+                            else f"Archive pipeline '{p['name']}'? Existing deals are unaffected.")
+            chips.append(
+                f'<span class="pipeline-chip{active_cls}{arch_cls}">'
+                f'<a href="/pipelines?pipeline_id={p["id"]}{ "&include_archived=1" if inc_arch else "" }">{_h(p["name"])}'
+                f'<span class="muted"> · {_h(p["type"])}</span></a>'
+                f'<form method="post" action="/pipelines/{p["id"]}/{arch_btn_action}" style="display:inline" '
+                f'      onsubmit="return confirm(\'{confirm_text}\');">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<button class="pipeline-archive-btn" type="submit">{arch_btn_label}</button>'
+                f'</form>'
+                f'</span>'
+            )
+        toggle_link = (
+            f'<a href="/pipelines?pipeline_id={pipeline_id}" class="btn secondary" '
+            f'   style="padding:3px 10px;font-size:11px">Hide archived</a>'
+            if inc_arch else
+            f'<a href="/pipelines?pipeline_id={pipeline_id}&include_archived=1" class="btn secondary" '
+            f'   style="padding:3px 10px;font-size:11px">Show archived</a>'
         )
+        selector = "".join(chips) + f'<span style="margin-left:auto">{toggle_link}</span>'
     else:
         selector = '<span class="faint">No pipelines yet. Create one below.</span>'
 
@@ -890,6 +960,194 @@ async def deal_create_form(
     return RedirectResponse(f"/pipelines?pipeline_id={pipeline_id}", status_code=303)
 
 
+@app.get("/deals/{deal_id}", response_class=HTMLResponse)
+def deal_detail(deal_id: int, request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    try:
+        deal = deals_service.get(ctx, deal_id)
+    except ServiceError as e:
+        raise HTTPException(status_code=404, detail=e.message)
+    pipeline = pipelines_service.get_pipeline(ctx, deal["pipeline_id"])
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
+    # related entities
+    contact_block = ""
+    if deal.get("contact_id"):
+        try:
+            cc = contacts_service.get(ctx, deal["contact_id"])
+            contact_block = (
+                f'<a href="/contacts/{cc["id"]}">{_h(cc.get("full_name") or cc.get("email") or "(unnamed)")}</a>'
+                + (f' <span class="muted">· {_h(cc.get("title") or "")}</span>' if cc.get("title") else "")
+            )
+        except ServiceError:
+            contact_block = f'<span class="faint">contact #{deal["contact_id"]} (not found)</span>'
+    else:
+        contact_block = '<span class="faint">no contact linked</span>'
+
+    company_block = ""
+    if deal.get("company_id"):
+        try:
+            co = companies_service.get(ctx, deal["company_id"])
+            company_block = f'<a href="/companies/{co["id"]}">{_h(co.get("name") or "(unnamed)")}</a>'
+        except ServiceError:
+            company_block = f'<span class="faint">company #{deal["company_id"]} (not found)</span>'
+    else:
+        company_block = '<span class="faint">no company linked</span>'
+
+    # related tasks
+    tasks_data = tasks_service.list_(ctx, deal_id=deal_id, limit=200)
+    if tasks_data["items"]:
+        task_rows = "".join(
+            f'<tr><td><a href="/tasks/{t["id"]}">{_h(t["title"])}</a></td>'
+            f'<td><span class="task-prio prio-{_h(t["priority"])}">{_h(t["priority"])}</span></td>'
+            f'<td>{_h(t["status"])}</td></tr>'
+            for t in tasks_data["items"]
+        )
+    else:
+        task_rows = '<tr><td colspan="3" class="empty">No tasks on this deal yet.</td></tr>'
+
+    # audit for this deal
+    with db() as conn:
+        ev_rows = conn.execute(
+            "SELECT ts, action, surface, user_id FROM audit_log "
+            "WHERE object_type='deal' AND object_id=? ORDER BY ts DESC LIMIT 50",
+            (deal_id,),
+        ).fetchall()
+    import time as _t
+    audit_rows = "".join(
+        f'<tr><td class="mono faint">{_t.strftime("%Y-%m-%d %H:%M", _t.localtime(r["ts"]))}</td>'
+        f'<td class="mono">{_h(r["action"])}</td>'
+        f'<td class="muted">{_h(r["surface"])}</td>'
+        f'<td class="muted">user #{r["user_id"] or "—"}</td></tr>'
+        for r in ev_rows
+    ) or '<tr><td colspan="4" class="empty">No history.</td></tr>'
+
+    # stage options for the move dropdown
+    stage_options = "".join(
+        f'<option value="{s["id"]}"{" selected" if s["id"] == deal["stage_id"] else ""}>{_h(s["name"])}'
+        + (" (won)" if s.get("is_won") else "")
+        + (" (lost)" if s.get("is_lost") else "")
+        + '</option>'
+        for s in pipeline["stages"]
+    )
+    # reopen control: shown only if deal is won/lost
+    reopen_block = ""
+    if deal["status"] in ("won", "lost"):
+        # first non-terminal stage in this pipeline
+        first_open = next(
+            (s for s in pipeline["stages"]
+             if not s.get("is_won") and not s.get("is_lost")),
+            None,
+        )
+        if first_open:
+            reopen_block = (
+                '<form method="post" action="/deals/' + str(deal_id) + '/reopen" style="margin-top:8px">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<input type="hidden" name="stage_id" value="{first_open["id"]}">'
+                f'<button class="btn secondary" type="submit">Reopen → {_h(first_open["name"])}</button>'
+                '</form>'
+            )
+
+    value_value = (
+        f"{deal['value_cents']/100:.2f}" if deal.get("value_cents") is not None else ""
+    )
+    expected_close_value = ""
+    if deal.get("expected_close"):
+        expected_close_value = _t.strftime("%Y-%m-%d", _t.localtime(deal["expected_close"]))
+
+    return HTMLResponse(_render(
+        "deal.html",
+        topnav=_topnav("pipelines", sess, csrf),
+        id=str(deal_id),
+        title=_h(deal["title"] or "(untitled)"),
+        status=_h(deal["status"]),
+        pipeline_name=_h(pipeline["name"]),
+        pipeline_id=str(deal["pipeline_id"]),
+        stage_options=stage_options,
+        reopen_block=reopen_block,
+        value_cents=value_value,
+        currency=_h(deal.get("currency") or ""),
+        probability=str(deal.get("probability") or ""),
+        expected_close=expected_close_value,
+        next_step=_h(deal.get("next_step") or ""),
+        notes=_h(deal.get("notes") or ""),
+        contact_block=contact_block,
+        company_block=company_block,
+        task_rows=task_rows,
+        audit_rows=audit_rows,
+        created_at=str(deal.get("created_at") or ""),
+        updated_at=str(deal.get("updated_at") or ""),
+        csrf=csrf,
+    ))
+
+
+@app.post("/deals/{deal_id}/edit")
+async def deal_edit_form(
+    deal_id: int, request: Request,
+    title: str = Form(""), value: str = Form(""), currency: str = Form(""),
+    probability: str = Form(""), expected_close: str = Form(""),
+    next_step: str = Form(""), notes: str = Form(""),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    payload = {}
+    if title.strip(): payload["title"] = title.strip()
+    if value.strip():
+        try:
+            payload["value_cents"] = int(round(float(value) * 100))
+        except ValueError:
+            return RedirectResponse(f"/deals/{deal_id}?error=value+must+be+a+number", status_code=303)
+    if currency.strip(): payload["currency"] = currency.strip().lower()
+    if probability.strip():
+        try:
+            payload["probability"] = int(probability)
+        except ValueError:
+            return RedirectResponse(f"/deals/{deal_id}?error=probability+must+be+0-100", status_code=303)
+    if expected_close.strip():
+        try:
+            import time as _t
+            payload["expected_close"] = int(_t.mktime(_t.strptime(expected_close, "%Y-%m-%d")))
+        except ValueError:
+            return RedirectResponse(f"/deals/{deal_id}?error=expected_close+must+be+YYYY-MM-DD", status_code=303)
+    if next_step.strip(): payload["next_step"] = next_step.strip()
+    if notes.strip(): payload["notes"] = notes.strip()
+    try:
+        deals_service.update(ctx, deal_id, payload)
+    except ServiceError as e:
+        return RedirectResponse(f"/deals/{deal_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/deals/{deal_id}", status_code=303)
+
+
+@app.post("/deals/{deal_id}/reopen")
+async def deal_reopen_form(deal_id: int, request: Request,
+                            stage_id: int = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        deals_service.update(ctx, deal_id, {"stage_id": stage_id, "status": "open"})
+    except ServiceError as e:
+        return RedirectResponse(f"/deals/{deal_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/deals/{deal_id}", status_code=303)
+
+
+@app.post("/deals/{deal_id}/delete")
+async def deal_delete_form(deal_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        d = deals_service.get(ctx, deal_id)
+        pid = d["pipeline_id"]
+        deals_service.delete(ctx, deal_id)
+    except ServiceError:
+        return RedirectResponse("/pipelines", status_code=303)
+    return RedirectResponse(f"/pipelines?pipeline_id={pid}", status_code=303)
+
+
 @app.post("/deals/{deal_id}/move")
 async def deal_move_form(deal_id: int, request: Request,
                          stage_id: int = Form(...), csrf: str = Form("")):
@@ -920,7 +1178,7 @@ def _task_row_html(t: dict, csrf: str) -> str:
         f'  <td style="width:30px">'
         f'    {("<form method=&#34;post&#34; action=&#34;/tasks/" + str(t["id"]) + "/complete&#34; style=&#34;display:inline&#34;>"          "<input type=&#34;hidden&#34; name=&#34;csrf&#34; value=&#34;" + csrf + "&#34;>"          "<button class=&#34;btn secondary&#34; style=&#34;padding:2px 8px&#34; title=&#34;Mark done&#34;>✓</button>"          "</form>") if t["status"] != "done" else "<span class=&#34;faint&#34;>done</span>"}'
         f'  </td>'
-        f'  <td><strong>{_h(t["title"])}</strong>'
+        f'  <td><strong><a href="/tasks/{t["id"]}">{_h(t["title"])}</a></strong>'
         + (f'<div class="muted" style="font-size:11.5px">{_h(t["description"])[:140]}</div>' if t.get("description") else "")
         + f'</td>'
         f'  <td><span class="task-prio prio-{_h(t["priority"])}">{_h(t["priority"])}</span></td>'
@@ -973,6 +1231,288 @@ def tasks_page(request: Request, view: str = "open"):
         tabs=tabs,
         rows=rows,
         total=str(result["total"]),
+        csrf=csrf,
+    ))
+
+
+@app.get("/tasks/{task_id}", response_class=HTMLResponse)
+def task_detail(task_id: int, request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    try:
+        task = tasks_service.get(ctx, task_id)
+    except ServiceError as e:
+        raise HTTPException(status_code=404, detail=e.message)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
+    # related entity links
+    def _link_to(svc, entity_id, kind, label_key):
+        if not entity_id:
+            return f'<span class="faint">no {kind} linked</span>'
+        try:
+            row = svc.get(ctx, entity_id)
+            return f'<a href="/{kind}s/{row["id"]}">{_h(row.get(label_key) or row.get("name") or "(unnamed)")}</a>'
+        except ServiceError:
+            return f'<span class="faint">{kind} #{entity_id} (not found)</span>'
+
+    contact_link = _link_to(contacts_service, task.get("contact_id"), "contact", "full_name")
+    company_link = _link_to(companies_service, task.get("company_id"), "company", "name")
+    deal_link = ""
+    if task.get("deal_id"):
+        try:
+            dd = deals_service.get(ctx, task["deal_id"])
+            deal_link = f'<a href="/deals/{dd["id"]}">{_h(dd["title"])}</a>'
+        except ServiceError:
+            deal_link = f'<span class="faint">deal #{task["deal_id"]} (not found)</span>'
+    else:
+        deal_link = '<span class="faint">no deal linked</span>'
+
+    import time as _t
+    due_value = ""
+    if task.get("due_date"):
+        due_value = _t.strftime("%Y-%m-%d", _t.localtime(task["due_date"]))
+
+    # status + priority option selectors
+    def _opts(values, current):
+        return "".join(
+            f'<option value="{v}"{ " selected" if v == current else "" }>{v}</option>'
+            for v in values
+        )
+    priority_opts = _opts(("low", "normal", "high", "urgent"), task.get("priority") or "normal")
+    status_opts = _opts(("open", "in_progress", "done", "cancelled"), task.get("status") or "open")
+
+    # audit
+    with db() as conn:
+        ev_rows = conn.execute(
+            "SELECT ts, action, surface, user_id FROM audit_log "
+            "WHERE object_type='task' AND object_id=? ORDER BY ts DESC LIMIT 50",
+            (task_id,),
+        ).fetchall()
+    audit_rows = "".join(
+        f'<tr><td class="mono faint">{_t.strftime("%Y-%m-%d %H:%M", _t.localtime(r["ts"]))}</td>'
+        f'<td class="mono">{_h(r["action"])}</td>'
+        f'<td class="muted">{_h(r["surface"])}</td>'
+        f'<td class="muted">user #{r["user_id"] or "—"}</td></tr>'
+        for r in ev_rows
+    ) or '<tr><td colspan="4" class="empty">No history.</td></tr>'
+
+    # quick complete/reopen control
+    if task["status"] == "done":
+        toggle_block = (
+            '<form method="post" action="/tasks/' + str(task_id) + '/reopen" style="display:inline">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            '<button class="btn secondary" type="submit">↩ Reopen task</button>'
+            '</form>'
+        )
+    else:
+        toggle_block = (
+            '<form method="post" action="/tasks/' + str(task_id) + '/complete" style="display:inline">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            '<button class="btn" type="submit">✓ Mark done</button>'
+            '</form>'
+        )
+
+    return HTMLResponse(_render(
+        "task.html",
+        topnav=_topnav("tasks", sess, csrf),
+        id=str(task_id),
+        title=_h(task["title"]),
+        description=_h(task.get("description") or ""),
+        status=_h(task["status"]),
+        priority=_h(task["priority"]),
+        priority_opts=priority_opts,
+        status_opts=status_opts,
+        due_date=due_value,
+        contact_link=contact_link,
+        company_link=company_link,
+        deal_link=deal_link,
+        toggle_block=toggle_block,
+        audit_rows=audit_rows,
+        created_at=str(task.get("created_at") or ""),
+        updated_at=str(task.get("updated_at") or ""),
+        completed_at=str(task.get("completed_at") or "") or "—",
+        csrf=csrf,
+    ))
+
+
+@app.post("/tasks/{task_id}/edit")
+async def task_edit_form(
+    task_id: int, request: Request,
+    title: str = Form(""), description: str = Form(""),
+    priority: str = Form(""), status: str = Form(""),
+    due_date: str = Form(""),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    payload = {}
+    if title.strip(): payload["title"] = title.strip()
+    if description.strip() != "": payload["description"] = description.strip()
+    if priority.strip(): payload["priority"] = priority.strip()
+    if status.strip(): payload["status"] = status.strip()
+    if due_date.strip():
+        try:
+            import time as _t
+            payload["due_date"] = int(_t.mktime(_t.strptime(due_date, "%Y-%m-%d")))
+        except ValueError:
+            return RedirectResponse(f"/tasks/{task_id}?error=due_date+must+be+YYYY-MM-DD", status_code=303)
+    if not payload:
+        return RedirectResponse(f"/tasks/{task_id}", status_code=303)
+    try:
+        tasks_service.update(ctx, task_id, payload)
+    except ServiceError as e:
+        return RedirectResponse(f"/tasks/{task_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/tasks/{task_id}", status_code=303)
+
+
+@app.post("/tasks/{task_id}/reopen")
+async def task_reopen_form(task_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        tasks_service.update(ctx, task_id, {"status": "open"})
+    except ServiceError as e:
+        return RedirectResponse(f"/tasks/{task_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/tasks/{task_id}", status_code=303)
+
+
+@app.post("/contacts/{contact_id}/restore")
+async def contact_restore_form(contact_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        contacts_service.restore(ctx, contact_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/contacts?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/contacts/{contact_id}", status_code=303)
+
+
+@app.post("/companies/{company_id}/restore")
+async def company_restore_form(company_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        companies_service.restore(ctx, company_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/companies?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/companies/{company_id}", status_code=303)
+
+
+@app.post("/pipelines/{pipeline_id}/archive")
+async def pipeline_archive_form(pipeline_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        pipelines_service.archive_pipeline(ctx, pipeline_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/pipelines?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/pipelines", status_code=303)
+
+
+@app.post("/pipelines/{pipeline_id}/unarchive")
+async def pipeline_unarchive_form(pipeline_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        pipelines_service.unarchive_pipeline(ctx, pipeline_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/pipelines?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/pipelines?pipeline_id={pipeline_id}", status_code=303)
+
+
+@app.get("/audit", response_class=HTMLResponse)
+def audit_page(request: Request,
+               object_type: str = "", object_id: str = "",
+               action: str = "", surface: str = "",
+               user_id: str = "", request_id: str = "",
+               limit: int = 100, offset: int = 0):
+    sess = _require_session(request)
+    if sess["role"] != "admin":
+        raise HTTPException(status_code=403, detail="audit log is admin-only")
+    csrf = auth_mod.csrf_token_for(sess["id"])
+
+    where, params = [], []
+    if object_type.strip(): where.append("object_type = ?"); params.append(object_type.strip())
+    if object_id.strip():
+        try: params.append(int(object_id)); where.append("object_id = ?")
+        except ValueError: pass
+    if action.strip(): where.append("action LIKE ?"); params.append(f"%{action.strip()}%")
+    if surface.strip(): where.append("surface = ?"); params.append(surface.strip())
+    if user_id.strip():
+        try: params.append(int(user_id)); where.append("user_id = ?")
+        except ValueError: pass
+    if request_id.strip(): where.append("request_id = ?"); params.append(request_id.strip())
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+
+    import time as _t
+    with db() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM audit_log{where_sql}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT id, ts, user_id, api_key_id, surface, action, object_type, "
+            f"       object_id, request_id FROM audit_log{where_sql} "
+            f"ORDER BY ts DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+
+    def _link_object(otype, oid):
+        if oid is None: return f'<span class="faint">—</span>'
+        plural = {"contact": "contacts", "company": "companies", "deal": "deals",
+                  "task": "tasks", "form": "forms", "segment": "segments",
+                  "note": "contacts"}.get(otype)
+        if plural and plural != "contacts" or otype == "contact":
+            return f'<a href="/{plural}/{oid}">{otype} #{oid}</a>'
+        return f'{otype} #{oid}'
+
+    body_rows = "".join(
+        f'<tr><td class="mono faint">{_t.strftime("%Y-%m-%d %H:%M:%S", _t.localtime(r["ts"]))}</td>'
+        f'<td class="mono">{_h(r["action"])}</td>'
+        f'<td>{_link_object(r["object_type"], r["object_id"])}</td>'
+        f'<td class="muted">{_h(r["surface"])}</td>'
+        f'<td class="muted">user #{r["user_id"] or "—"}'
+        + (f' / key #{r["api_key_id"]}' if r["api_key_id"] else "")
+        + f'</td>'
+        f'<td class="mono faint" style="font-size:10.5px">{_h(r["request_id"] or "")}</td></tr>'
+        for r in rows
+    ) or '<tr><td colspan="6" class="empty">No matching audit entries.</td></tr>'
+
+    # Build prev/next links preserving the filter query
+    from urllib.parse import urlencode
+    qs_base = {k: v for k, v in {
+        "object_type": object_type, "object_id": object_id, "action": action,
+        "surface": surface, "user_id": user_id, "request_id": request_id,
+        "limit": str(limit),
+    }.items() if v}
+    prev_off = max(0, offset - limit)
+    next_off = offset + limit
+    prev_link = (f'<a href="/audit?{urlencode({**qs_base, "offset": str(prev_off)})}">‹ prev</a>'
+                 if offset > 0 else '<span class="faint">‹ prev</span>')
+    next_link = (f'<a href="/audit?{urlencode({**qs_base, "offset": str(next_off)})}">next ›</a>'
+                 if next_off < total else '<span class="faint">next ›</span>')
+
+    return HTMLResponse(_render(
+        "audit.html",
+        topnav=_topnav("", sess, csrf),
+        rows=body_rows,
+        total=str(total),
+        offset=str(offset),
+        limit=str(limit),
+        prev_link=prev_link,
+        next_link=next_link,
+        f_object_type=_h(object_type),
+        f_object_id=_h(object_id),
+        f_action=_h(action),
+        f_surface=_h(surface),
+        f_user_id=_h(user_id),
+        f_request_id=_h(request_id),
         csrf=csrf,
     ))
 

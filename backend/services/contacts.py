@@ -251,3 +251,47 @@ def delete(ctx: ServiceContext, contact_id: int) -> dict:
         webhooks.enqueue(conn, "contact.deleted", {"contact_id": contact_id})
         _plugins.dispatch("on_contact_deleted", ctx, before, conn)
     return {"id": contact_id, "deleted_at": now}
+
+
+def restore(ctx: ServiceContext, contact_id: int) -> dict:
+    """Undo a soft-delete. If the email collides with another active contact,
+    the restore fails with CONTACT_EMAIL_EXISTS so the operator can decide
+    (merge, rename, or leave deleted)."""
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    now = int(time.time())
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM contacts WHERE id = ? AND deleted_at IS NOT NULL",
+            (contact_id,),
+        ).fetchone()
+        if not row:
+            raise ServiceError("CONTACT_NOT_FOUND",
+                               f"deleted contact {contact_id} not found")
+        before = _row_to_dict(row)
+        if before.get("email"):
+            clash = conn.execute(
+                "SELECT id FROM contacts WHERE email = ? "
+                " AND deleted_at IS NULL AND id != ?",
+                (before["email"], contact_id),
+            ).fetchone()
+            if clash:
+                raise ServiceError(
+                    "CONTACT_EMAIL_EXISTS",
+                    f"another active contact already has email {before['email']!r}",
+                    {"contact_id": clash[0]},
+                )
+        conn.execute(
+            "UPDATE contacts SET deleted_at = NULL, updated_at = ? WHERE id = ?",
+            (now, contact_id),
+        )
+        after_row = conn.execute(
+            "SELECT * FROM contacts WHERE id = ?", (contact_id,)
+        ).fetchone()
+        after = _row_to_dict(after_row)
+        audit.log(conn, ctx,
+                  action="contact.restored", object_type="contact",
+                  object_id=contact_id, before=before, after=after)
+        webhooks.enqueue(conn, "contact.restored", {"contact": after})
+        _plugins.dispatch("on_contact_restored", ctx, after, conn)
+    return after

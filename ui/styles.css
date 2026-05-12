@@ -137,6 +137,39 @@ a.active { color: var(--grey-10); }
   font-size: 11px;
 }
 .topsearch-footer a { color: var(--blueberry); }
+
+/* Soft-deleted rows on list pages */
+.row-deleted { opacity: 0.55; background: var(--grey-1); }
+.row-deleted a { color: var(--grey-7); }
+.row-deleted:hover { opacity: 0.85; }
+
+/* Deal card title link */
+.deal-card .deal-title a { color: inherit; text-decoration: none; }
+.deal-card .deal-title a:hover { text-decoration: underline; }
+
+/* Flash error banner */
+.flash {
+  padding: 10px 14px; margin: 0 0 14px 0;
+  border: 1px solid; font-size: 13px;
+}
+.flash.error {
+  background: #fff1f0; border-color: #f5b1ad; color: #8c1d18;
+}
+.flash.success {
+  background: #ecf7ec; border-color: #b6d9b6; color: #2b6b2b;
+}
+.flash a.dismiss {
+  float: right; color: inherit; font-weight: 700; text-decoration: none;
+  margin-left: 12px;
+}
+
+/* Pipeline strip — make individual chips include their own controls */
+.pipeline-chip.archived { opacity: 0.55; }
+.pipeline-archive-btn {
+  display: inline-block; margin-left: 6px; padding: 1px 6px;
+  font-size: 10px; color: var(--grey-7); border: 1px solid var(--grey-3);
+  background: transparent;
+}
 mark { background: var(--blueberry); color: var(--grey-10); padding: 0 2px; }
 
 /* Contact tag chips */

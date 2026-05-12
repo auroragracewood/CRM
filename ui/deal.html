@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Deal · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>{{title}}<span class="muted" style="font-weight:400; margin-left:8px">#{{id}}</span></h1>
+    <span class="meta">
+      <span class="deal-status status-{{status}}">{{status}}</span>
+      on pipeline <a href="/pipelines?pipeline_id={{pipeline_id}}">{{pipeline_name}}</a>
+    </span>
+  </div>
+
+  <div class="two-col">
+
+    <div>
+      <div class="card">
+        <h2>Stage</h2>
+        <form method="post" action="/deals/{{id}}/move">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row">
+            <label>Stage</label>
+            <select name="stage_id" onchange="this.form.submit()">{{stage_options}}</select>
+          </div>
+        </form>
+        {{reopen_block}}
+      </div>
+
+      <div class="card">
+        <h2>Details</h2>
+        <form method="post" action="/deals/{{id}}/edit">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Title</label><input name="title" value="{{title}}"></div>
+          <div class="row"><label>Value</label>
+            <input name="value" value="{{value_cents}}" placeholder="18000.00">
+          </div>
+          <div class="row"><label>Currency</label>
+            <input name="currency" value="{{currency}}" placeholder="cad">
+          </div>
+          <div class="row"><label>Probability</label>
+            <input name="probability" value="{{probability}}" placeholder="60" type="number" min="0" max="100">
+            <span class="muted" style="font-size:11px">0–100</span>
+          </div>
+          <div class="row"><label>Expected close</label>
+            <input name="expected_close" value="{{expected_close}}" placeholder="2026-12-31">
+          </div>
+          <div class="row"><label>Next step</label>
+            <input name="next_step" value="{{next_step}}" placeholder="Send proposal Friday">
+          </div>
+          <div class="row"><label>Notes</label>
+            <textarea name="notes" rows="3">{{notes}}</textarea>
+          </div>
+          <div class="row"><label></label>
+            <div class="actions"><button class="btn" type="submit">Save changes</button></div>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Related tasks</h2>
+        <table>
+          <thead><tr><th>Title</th><th>Priority</th><th>Status</th></tr></thead>
+          <tbody>{{task_rows}}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>People</h2>
+        <div class="row"><label>Contact</label><div>{{contact_block}}</div></div>
+        <div class="row"><label>Company</label><div>{{company_block}}</div></div>
+      </div>
+
+      <div class="card">
+        <h2>History</h2>
+        <p class="muted" style="font-size:11.5px; margin-top:0">Audit log entries for this deal.</p>
+        <table>
+          <thead><tr><th>when</th><th>action</th><th>surface</th><th>by</th></tr></thead>
+          <tbody>{{audit_rows}}</tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h2>Danger zone</h2>
+        <p class="muted" style="font-size:12px; margin-top:0">
+          Hard-deletes the deal record. Tasks attached cascade-delete too.
+          This is NOT reversible. Prefer moving the deal to a lost/nurture
+          stage if the relationship is ongoing.
+        </p>
+        <form method="post" action="/deals/{{id}}/delete"
+              onsubmit="return confirm('Hard-delete deal #{{id}}? This cannot be undone.');">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <button class="btn danger" type="submit">Delete deal</button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

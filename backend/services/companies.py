@@ -149,3 +149,43 @@ def delete(ctx: ServiceContext, company_id: int) -> dict:
                   object_id=company_id, before=before)
         webhooks.enqueue(conn, "company.deleted", {"company_id": company_id})
     return {"id": company_id, "deleted_at": now}
+
+
+def restore(ctx: ServiceContext, company_id: int) -> dict:
+    """Undo a soft-delete. Slug collisions raise COMPANY_SLUG_EXISTS."""
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    now = int(time.time())
+    with db() as conn:
+        row = conn.execute(
+            "SELECT * FROM companies WHERE id = ? AND deleted_at IS NOT NULL",
+            (company_id,),
+        ).fetchone()
+        if not row:
+            raise ServiceError("COMPANY_NOT_FOUND",
+                               f"deleted company {company_id} not found")
+        before = _row_to_dict(row)
+        if before.get("slug"):
+            clash = conn.execute(
+                "SELECT id FROM companies WHERE slug = ? "
+                " AND deleted_at IS NULL AND id != ?",
+                (before["slug"], company_id),
+            ).fetchone()
+            if clash:
+                raise ServiceError(
+                    "COMPANY_SLUG_EXISTS",
+                    f"another active company already has slug {before['slug']!r}",
+                    {"company_id": clash[0]},
+                )
+        conn.execute(
+            "UPDATE companies SET deleted_at = NULL, updated_at = ? WHERE id = ?",
+            (now, company_id),
+        )
+        after_row = conn.execute(
+            "SELECT * FROM companies WHERE id = ?", (company_id,)
+        ).fetchone()
+        after = _row_to_dict(after_row)
+        audit.log(conn, ctx, action="company.restored", object_type="company",
+                  object_id=company_id, before=before, after=after)
+        webhooks.enqueue(conn, "company.restored", {"company": after})
+    return after
