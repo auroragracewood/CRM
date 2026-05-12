@@ -24,10 +24,15 @@ VALID_STATUSES = ("open", "in_progress", "done", "cancelled")
 
 
 def _validate(payload: dict, *, is_create: bool) -> dict:
-    cleaned = {k: payload.get(k) for k in _FIELDS}
+    # On CREATE: expand to all fields so missing optional columns default to None.
+    # On UPDATE: keep ONLY what the caller passed — otherwise the UPDATE would
+    # null out title/priority/status and corrupt the row.
     if is_create:
+        cleaned = {k: payload.get(k) for k in _FIELDS}
         if not cleaned.get("title") or not cleaned["title"].strip():
             raise ServiceError("VALIDATION_ERROR", "task requires a title")
+    else:
+        cleaned = {k: payload[k] for k in payload if k in _FIELDS}
     if cleaned.get("priority") and cleaned["priority"] not in VALID_PRIORITIES:
         raise ServiceError("VALIDATION_ERROR",
                            f"priority must be one of {VALID_PRIORITIES}")

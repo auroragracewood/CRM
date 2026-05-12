@@ -18,14 +18,19 @@ _VALID_STATUS = ("open", "won", "lost", "nurture")
 
 
 def _validate(payload: dict, *, is_create: bool) -> dict:
-    cleaned = {k: payload.get(k) for k in _FIELDS}
+    # On CREATE: expand to all fields so missing optional columns default to None.
+    # On UPDATE: keep ONLY what the caller passed — otherwise the UPDATE would
+    # overwrite every column to NULL, including NOT NULL ones like pipeline_id.
     if is_create:
+        cleaned = {k: payload.get(k) for k in _FIELDS}
         if not cleaned.get("title"):
             raise ServiceError("VALIDATION_ERROR", "deal requires title")
         if not cleaned.get("pipeline_id"):
             raise ServiceError("VALIDATION_ERROR", "deal requires pipeline_id")
         if not cleaned.get("stage_id"):
             raise ServiceError("VALIDATION_ERROR", "deal requires stage_id")
+    else:
+        cleaned = {k: payload[k] for k in payload if k in _FIELDS}
     if cleaned.get("status") and cleaned["status"] not in _VALID_STATUS:
         raise ServiceError("VALIDATION_ERROR",
                            f"status must be one of {_VALID_STATUS}")
