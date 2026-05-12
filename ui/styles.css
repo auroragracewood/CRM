@@ -200,6 +200,24 @@ a.active { color: var(--grey-10); }
 .saved-views-bar input[type=text],
 .saved-views-bar input:not([type]) { font-size: 11.5px; padding: 3px 8px; width: 200px; }
 
+/* Pipeline stage management */
+.stage-mgmt h2 { margin-bottom: 6px; }
+.stage-edit-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--grey-2);
+  font-size: 12px;
+}
+.stage-edit-row:last-child { border-bottom: none; }
+.stage-edit-row label {
+  font-size: 11px; display: inline-flex; align-items: center; gap: 4px;
+  color: var(--fg-muted);
+}
+.stage-edit-row input[type=text], .stage-edit-row input:not([type]) {
+  font-size: 12px; padding: 4px 8px;
+}
+
+
 /* Themed confirmation modal (replaces browser confirm() opt-in) */
 .crm-modal-backdrop {
   position: fixed; inset: 0;

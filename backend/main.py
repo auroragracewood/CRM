@@ -145,6 +145,7 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
              ("Reports", "/reports", "reports"),
              ("Connectors", "/connectors", "connectors"),
              ("Plug-ins", "/plugins", "plugins"),
+             ("Tags", "/tags", "tags"),
              ("Audit", "/audit", "audit"),
              ("Settings", "/settings", "settings")]
     links = "".join(
@@ -597,10 +598,11 @@ def contact_detail(contact_id: int, request: Request):
     def _note_card(n):
         is_redacted = bool(n.get("_private_redacted"))
         is_just_revealed = (n.get("id") == just_revealed_id)
+        body_text = "" if is_redacted else (n.get("body") or "")
         body_html = (
             f'<em class="faint">private — body redacted</em>'
             if is_redacted and not is_just_revealed
-            else _h(n.get("body") or "")
+            else _h(body_text)
         )
         reveal_btn = ""
         if is_redacted and not is_just_revealed and sess["role"] == "admin":
@@ -616,6 +618,31 @@ def contact_detail(contact_id: int, request: Request):
             ' <span class="task-prio prio-high" style="margin-left:6px">just revealed (audited)</span>'
             if is_just_revealed else ""
         )
+        is_mine = (n.get("created_by") == sess["user_id"])
+        can_edit = is_mine or sess["role"] == "admin"
+        # Inline edit form, hidden by default — a small Edit link toggles it.
+        edit_form = ""
+        if can_edit and not is_redacted:
+            edit_form = (
+                f'<details style="margin-top:8px"><summary class="muted" '
+                f'        style="font-size:11px;cursor:pointer">Edit / delete</summary>'
+                f'<form method="post" action="/notes/{n["id"]}/edit" style="margin-top:6px">'
+                f'  <input type="hidden" name="csrf" value="{csrf}">'
+                f'  <input type="hidden" name="contact_id" value="{contact["id"]}">'
+                f'  <select name="visibility" style="font-size:11px;padding:2px 6px">'
+                + "".join(f'<option value="{v}"{ " selected" if n.get("visibility") == v else "" }>{v}</option>'
+                          for v in ("public","team","private"))
+                + '</select>'
+                f'  <textarea name="body" rows="3" style="display:block;width:100%;margin-top:4px;font-size:12px">'
+                f'{_h(body_text)}</textarea>'
+                f'  <div style="margin-top:6px; display:flex; gap:6px">'
+                f'  <button class="btn secondary" style="padding:2px 10px;font-size:11px" type="submit">Save</button>'
+                f'  <button class="btn danger" formaction="/notes/{n["id"]}/delete" '
+                f'          style="padding:2px 10px;font-size:11px" type="submit" '
+                f'          onclick="return confirm(&#39;Delete this note?&#39;);">Delete</button>'
+                f'  </div>'
+                f'</form></details>'
+            )
         return (
             f'<div class="card" style="margin:0 0 8px 0; padding:10px 12px">'
             f'<div class="row-flex" style="margin-bottom:4px">'
@@ -626,11 +653,12 @@ def contact_detail(contact_id: int, request: Request):
             f'</div>'
             f'<div>{body_html}</div>'
             + (f'<div style="margin-top:6px">{reveal_btn}</div>' if reveal_btn else "")
+            + edit_form
             + f'</div>'
         )
 
     notes_html = "".join(_note_card(n) for n in notes_list) or \
-                 '<div class="empty" style="padding:14px">No notes yet.</div>'
+                 '<div class="empty" style="padding:14px">No notes yet. Add one below.</div>'
 
     # Portal tokens block — shows existing tokens + a "issue new" form. If
     # ?portal_token=<raw> just arrived (after issuance), highlight the new URL.
@@ -1067,11 +1095,55 @@ def pipelines_page(request: Request, pipeline_id: int = 0,
             f'<div class="kanban">{"".join(columns)}</div>'
         )
 
+    # Stage management UI for the active pipeline
+    stage_mgmt_html = ""
+    if active:
+        stage_rows = []
+        for s in active["stages"]:
+            won_chk = " checked" if s.get("is_won") else ""
+            lost_chk = " checked" if s.get("is_lost") else ""
+            stage_rows.append(
+                f'<form method="post" action="/pipelines/stages/{s["id"]}/edit" '
+                f'      class="stage-edit-row">'
+                f'  <input type="hidden" name="csrf" value="{csrf}">'
+                f'  <input type="hidden" name="pipeline_id" value="{active["id"]}">'
+                f'  <input name="position" type="number" value="{s["position"]}" '
+                f'         style="width:50px" title="position">'
+                f'  <input name="name" value="{_h(s["name"])}" style="flex:1">'
+                f'  <label><input type="checkbox" name="is_won" value="1"{won_chk}> won</label>'
+                f'  <label><input type="checkbox" name="is_lost" value="1"{lost_chk}> lost</label>'
+                f'  <button class="btn secondary" type="submit" style="padding:3px 10px;font-size:11px">Save</button>'
+                f'  <button class="btn danger" type="submit" formaction="/pipelines/stages/{s["id"]}/delete" '
+                f'          style="padding:3px 10px;font-size:11px" '
+                f'          onclick="return confirm(\'Delete stage \\\'{_h(s["name"])}\\\'? Refuses if any deal is on it.\');">×</button>'
+                f'</form>'
+            )
+        stages_html_inner = "\n".join(stage_rows)
+        stage_mgmt_html = (
+            f'<div class="card stage-mgmt">'
+            f'<h2>Manage stages for <em>{_h(active["name"])}</em></h2>'
+            f'<p class="muted" style="font-size:11.5px;margin-top:0">'
+            f'Edit positions, names, and is_won / is_lost flags. Reorder by '
+            f'changing position numbers. Deleting a stage refuses if any deal is '
+            f'on it — move them first.</p>'
+            f'{stages_html_inner}'
+            f'<form method="post" action="/pipelines/{active["id"]}/stages/new" '
+            f'      class="stage-edit-row" style="margin-top:10px; border-top:1px solid var(--grey-3); padding-top:10px">'
+            f'  <input type="hidden" name="csrf" value="{csrf}">'
+            f'  <input name="name" placeholder="New stage name" required style="flex:1">'
+            f'  <label><input type="checkbox" name="is_won" value="1"> won</label>'
+            f'  <label><input type="checkbox" name="is_lost" value="1"> lost</label>'
+            f'  <button class="btn" type="submit" style="padding:3px 14px;font-size:11.5px">+ Add stage</button>'
+            f'</form>'
+            f'</div>'
+        )
+
     return HTMLResponse(_render(
         "pipelines.html",
         topnav=_topnav("pipelines", sess, csrf),
         selector=selector,
         kanban=kanban_html,
+        stage_mgmt=stage_mgmt_html,
         csrf=csrf,
     ))
 
@@ -1845,6 +1917,7 @@ def form_detail(form_id: int, request: Request):
         routing_json=_h(form.get("routing_json") or ""),
         sub_rows=sub_rows_html,
         total=str(subs["total"]),
+        csrf=csrf,
     ))
 
 
@@ -2104,6 +2177,261 @@ async def contact_delete_form(contact_id: int, request: Request, csrf: str = For
     except ServiceError:
         pass
     return RedirectResponse("/contacts", status_code=303)
+
+
+# ---------- tags management ----------
+
+@app.get("/tags", response_class=HTMLResponse)
+def tags_page(request: Request):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    from .services import tags as _tags
+    all_tags = _tags.list_all(ctx)
+    with db() as conn:
+        usage = {r["tag_id"]: r["n"] for r in conn.execute(
+            "SELECT tag_id, COUNT(*) AS n FROM ("
+            " SELECT tag_id FROM contact_tags UNION ALL SELECT tag_id FROM company_tags"
+            ") GROUP BY tag_id"
+        ).fetchall()}
+    rows = []
+    for t in all_tags:
+        color_chip = (f'<span style="display:inline-block;width:14px;height:14px;'
+                      f'background:{_h(t.get("color") or "#888")};border:1px solid var(--grey-4);'
+                      f'vertical-align:-2px;margin-right:6px"></span>')
+        n = usage.get(t["id"], 0)
+        rows.append(
+            f'<tr><td>{color_chip}'
+            f'<form method="post" action="/tags/{t["id"]}/edit" style="display:inline-flex; gap:6px">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<input name="name" value="{_h(t["name"])}" style="font-size:12px;padding:3px 6px">'
+            f'<input name="color" value="{_h(t.get("color") or "")}" placeholder="#hex" style="width:80px;font-size:12px;padding:3px 6px">'
+            f'<select name="scope" style="font-size:12px;padding:3px 6px">'
+            + "".join(f'<option value="{s}"{ " selected" if t.get("scope") == s else "" }>{s}</option>'
+                      for s in ("contact","company","any"))
+            + '</select>'
+            f'<button class="btn secondary" style="padding:3px 10px;font-size:11px" type="submit">Save</button>'
+            f'</form></td>'
+            f'<td class="mono faint">{n}</td>'
+            f'<td><form method="post" action="/tags/{t["id"]}/delete" style="display:inline" '
+            f'         data-confirm="Delete tag {t["name"]!r}? It will be detached from {n} record(s).">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<button class="btn danger" style="padding:3px 10px;font-size:11px" type="submit">Delete</button>'
+            f'</form></td></tr>'
+        )
+    rows_html = "\n".join(rows) or '<tr><td colspan="3" class="empty">No tags yet. Create one below.</td></tr>'
+    return HTMLResponse(_render(
+        "tags.html",
+        topnav=_topnav("", sess, csrf),
+        rows=rows_html,
+        csrf=csrf,
+    ))
+
+
+@app.post("/tags/new")
+async def tag_create_form(request: Request, name: str = Form(""),
+                          color: str = Form(""), scope: str = Form("any"),
+                          csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    from .services import tags as _tags
+    try:
+        _tags.create(ctx, name, color=color or None, scope=scope)
+    except ServiceError as e:
+        return RedirectResponse(f"/tags?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/tags?info=Tag+created", status_code=303)
+
+
+@app.post("/tags/{tag_id}/edit")
+async def tag_edit_form(tag_id: int, request: Request,
+                        name: str = Form(""), color: str = Form(""),
+                        scope: str = Form(""), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    from .services import tags as _tags
+    try:
+        _tags.update(ctx, tag_id,
+                     name=name.strip() or None,
+                     color=color.strip() or None,
+                     scope=scope.strip() or None)
+    except ServiceError as e:
+        return RedirectResponse(f"/tags?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/tags?info=Tag+saved", status_code=303)
+
+
+@app.post("/tags/{tag_id}/delete")
+async def tag_delete_form(tag_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    from .services import tags as _tags
+    try:
+        _tags.delete(ctx, tag_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/tags?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/tags?info=Tag+deleted", status_code=303)
+
+
+# ---------- pipeline stage management ----------
+
+@app.post("/pipelines/{pipeline_id}/stages/new")
+async def stage_create_form(pipeline_id: int, request: Request,
+                             name: str = Form(""), is_won: str = Form(""),
+                             is_lost: str = Form(""), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        pipelines_service.add_stage(ctx, pipeline_id, name,
+                                    is_won=bool(is_won), is_lost=bool(is_lost))
+    except ServiceError as e:
+        return RedirectResponse(
+            f"/pipelines?pipeline_id={pipeline_id}&error={_h(e.message)}",
+            status_code=303,
+        )
+    return RedirectResponse(f"/pipelines?pipeline_id={pipeline_id}", status_code=303)
+
+
+@app.post("/pipelines/stages/{stage_id}/edit")
+async def stage_edit_form(stage_id: int, request: Request,
+                          name: str = Form(""),
+                          position: str = Form(""),
+                          is_won: str = Form(""),
+                          is_lost: str = Form(""),
+                          pipeline_id: int = Form(...),
+                          csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        pos = int(position) if position.strip() else None
+        pipelines_service.update_stage(
+            ctx, stage_id,
+            name=name.strip() or None,
+            position=pos,
+            is_won=bool(is_won), is_lost=bool(is_lost),
+        )
+    except ServiceError as e:
+        return RedirectResponse(
+            f"/pipelines?pipeline_id={pipeline_id}&error={_h(e.message)}",
+            status_code=303,
+        )
+    return RedirectResponse(f"/pipelines?pipeline_id={pipeline_id}", status_code=303)
+
+
+@app.post("/pipelines/stages/{stage_id}/delete")
+async def stage_delete_form(stage_id: int, request: Request,
+                             pipeline_id: int = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        pipelines_service.delete_stage(ctx, stage_id)
+    except ServiceError as e:
+        return RedirectResponse(
+            f"/pipelines?pipeline_id={pipeline_id}&error={_h(e.message)}",
+            status_code=303,
+        )
+    return RedirectResponse(f"/pipelines?pipeline_id={pipeline_id}", status_code=303)
+
+
+# ---------- form edit + segment edit + note edit ----------
+
+@app.post("/forms/{form_id}/edit")
+async def form_edit_form(form_id: int, request: Request,
+                          name: str = Form(""), schema_json: str = Form(""),
+                          routing_json: str = Form(""),
+                          active: str = Form(""),
+                          csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    import json as _json
+    payload = {}
+    if name.strip(): payload["name"] = name.strip()
+    if schema_json.strip():
+        try:
+            payload["schema"] = _json.loads(schema_json)
+        except _json.JSONDecodeError as e:
+            return RedirectResponse(
+                f"/forms/{form_id}?error=Invalid+schema+JSON:+{_h(str(e))}",
+                status_code=303,
+            )
+    if routing_json.strip():
+        try:
+            payload["routing"] = _json.loads(routing_json)
+        except _json.JSONDecodeError as e:
+            return RedirectResponse(
+                f"/forms/{form_id}?error=Invalid+routing+JSON:+{_h(str(e))}",
+                status_code=303,
+            )
+    payload["active"] = bool(active)
+    try:
+        forms_service.update(ctx, form_id, payload)
+    except ServiceError as e:
+        return RedirectResponse(f"/forms/{form_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/forms/{form_id}?info=Form+saved", status_code=303)
+
+
+@app.post("/segments/{segment_id}/edit")
+async def segment_edit_form(segment_id: int, request: Request,
+                             name: str = Form(""),
+                             rules_json: str = Form(""),
+                             csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    import json as _json
+    payload = {}
+    if name.strip(): payload["name"] = name.strip()
+    if rules_json.strip():
+        try:
+            payload["rules"] = _json.loads(rules_json)
+        except _json.JSONDecodeError as e:
+            return RedirectResponse(
+                f"/segments/{segment_id}?error=Invalid+rules+JSON:+{_h(str(e))}",
+                status_code=303,
+            )
+    try:
+        segments_service.update(ctx, segment_id, payload)
+    except ServiceError as e:
+        return RedirectResponse(f"/segments/{segment_id}?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(f"/segments/{segment_id}?info=Segment+saved", status_code=303)
+
+
+@app.post("/notes/{note_id}/edit")
+async def note_edit_form(note_id: int, request: Request,
+                          contact_id: int = Form(...),
+                          body: str = Form(""),
+                          visibility: str = Form(""),
+                          csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        notes_service.update(ctx, note_id,
+                             body=body.strip() if body.strip() else None,
+                             visibility=visibility.strip() or None)
+    except ServiceError as e:
+        return RedirectResponse(f"/contacts/{contact_id}?error={_h(e.message)}",
+                                status_code=303)
+    return RedirectResponse(f"/contacts/{contact_id}?info=Note+saved", status_code=303)
+
+
+@app.post("/notes/{note_id}/delete")
+async def note_delete_form(note_id: int, request: Request,
+                            contact_id: int = Form(...), csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    try:
+        notes_service.delete(ctx, note_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/contacts/{contact_id}?error={_h(e.message)}",
+                                status_code=303)
+    return RedirectResponse(f"/contacts/{contact_id}?info=Note+deleted", status_code=303)
 
 
 # ---------- saved views ----------

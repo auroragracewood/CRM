@@ -102,6 +102,69 @@ def add_stage(ctx: ServiceContext, pipeline_id: int, name: str, *,
     return {"id": sid, "pipeline_id": pipeline_id, "name": name, "position": position}
 
 
+def update_stage(ctx: ServiceContext, stage_id: int, *,
+                 name: Optional[str] = None,
+                 position: Optional[int] = None,
+                 is_won: Optional[bool] = None,
+                 is_lost: Optional[bool] = None) -> dict:
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    fields = {}
+    if name is not None:
+        if not name.strip():
+            raise ServiceError("VALIDATION_ERROR", "stage name cannot be empty")
+        fields["name"] = name.strip()
+    if position is not None:
+        fields["position"] = int(position)
+    if is_won is not None: fields["is_won"] = 1 if is_won else 0
+    if is_lost is not None: fields["is_lost"] = 1 if is_lost else 0
+    if not fields:
+        raise ServiceError("VALIDATION_ERROR", "no fields to update")
+    if fields.get("is_won") and fields.get("is_lost"):
+        raise ServiceError("VALIDATION_ERROR",
+                           "stage can't be both is_won and is_lost")
+    with db() as conn:
+        before = conn.execute("SELECT * FROM pipeline_stages WHERE id=?",
+                              (stage_id,)).fetchone()
+        if not before:
+            raise ServiceError("PIPELINE_STAGE_NOT_FOUND",
+                               f"stage {stage_id} not found")
+        before = dict(before)
+        set_sql = ", ".join(f"{k}=?" for k in fields)
+        conn.execute(f"UPDATE pipeline_stages SET {set_sql} WHERE id=?",
+                     list(fields.values()) + [stage_id])
+        after = dict(conn.execute("SELECT * FROM pipeline_stages WHERE id=?",
+                                  (stage_id,)).fetchone())
+        audit.log(conn, ctx, action="stage.updated", object_type="stage",
+                  object_id=stage_id, before=before, after=after)
+    return after
+
+
+def delete_stage(ctx: ServiceContext, stage_id: int) -> dict:
+    """Refuses if any deal sits on this stage. Move/delete those deals first."""
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    with db() as conn:
+        before = conn.execute("SELECT * FROM pipeline_stages WHERE id=?",
+                              (stage_id,)).fetchone()
+        if not before:
+            raise ServiceError("PIPELINE_STAGE_NOT_FOUND",
+                               f"stage {stage_id} not found")
+        deals_here = conn.execute(
+            "SELECT COUNT(*) FROM deals WHERE stage_id=?", (stage_id,),
+        ).fetchone()[0]
+        if deals_here > 0:
+            raise ServiceError(
+                "VALIDATION_ERROR",
+                f"stage has {deals_here} deal(s) — move them before deleting",
+                {"deals_on_stage": deals_here},
+            )
+        conn.execute("DELETE FROM pipeline_stages WHERE id=?", (stage_id,))
+        audit.log(conn, ctx, action="stage.deleted", object_type="stage",
+                  object_id=stage_id, before=dict(before))
+    return {"id": stage_id, "deleted": True}
+
+
 def archive_pipeline(ctx: ServiceContext, pipeline_id: int) -> dict:
     if not ctx.can_write():
         raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")

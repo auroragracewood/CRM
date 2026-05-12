@@ -11,36 +11,58 @@
 
   <div class="pagebar">
     <h1>{{name}}<span class="muted" style="font-weight:400; margin-left:8px">#{{id}}</span></h1>
-    <span class="meta">{{total}} submissions</span>
+    <span class="meta">{{total}} submissions · slug: <code>{{slug}}</code></span>
   </div>
 
-  <div class="card">
-    <h2>Public URL</h2>
-    <p style="font-size:13px; margin-top:4px">
-      <a href="{{public_url}}" target="_blank" class="mono">{{public_url}}</a>
-    </p>
-    <p class="muted" style="font-size:12px">
-      Anyone with this URL can submit. Disable by toggling <code>active=false</code>
-      via <code>PUT /api/forms/{{id}}</code> (UI toggle coming).
-    </p>
-  </div>
+  <div class="two-col">
 
-  <div class="card">
-    <h2>Schema</h2>
-    <pre>{{schema_json}}</pre>
-  </div>
+    <div>
+      <div class="card">
+        <h2>Public URL</h2>
+        <p style="font-size:13px; margin-top:4px">
+          <a href="{{public_url}}" target="_blank" class="mono">{{public_url}}</a>
+        </p>
+        <p class="muted" style="font-size:11.5px">
+          Anyone with this URL can submit. To disable, uncheck Active below.
+        </p>
+      </div>
 
-  <div class="card">
-    <h2>Routing rules</h2>
-    <pre>{{routing_json}}</pre>
-  </div>
+      <div class="card">
+        <h2>Edit form</h2>
+        <form method="post" action="/forms/{{id}}/edit">
+          <input type="hidden" name="csrf" value="{{csrf}}">
+          <div class="row"><label>Name</label>
+            <input name="name" value="{{name}}">
+          </div>
+          <div class="row"><label>Active</label>
+            <select name="active">
+              <option value="1">yes</option>
+              <option value="">no — hide / 410 on public hits</option>
+            </select>
+          </div>
+          <div class="row"><label>Schema (JSON)</label>
+            <textarea name="schema_json" rows="14" class="mono" style="font-size:12px">{{schema_json}}</textarea>
+          </div>
+          <div class="row"><label>Routing (JSON)</label>
+            <textarea name="routing_json" rows="10" class="mono" style="font-size:12px">{{routing_json}}</textarea>
+          </div>
+          <div class="row"><label></label>
+            <div class="actions"><button class="btn" type="submit">Save form</button></div>
+          </div>
+        </form>
+      </div>
+    </div>
 
-  <div class="card">
-    <h2>Submissions</h2>
-    <table>
-      <thead><tr><th>created_at</th><th>Contact</th><th>Payload</th></tr></thead>
-      <tbody>{{sub_rows}}</tbody>
-    </table>
+    <div>
+      <div class="card">
+        <h2>Recent submissions ({{total}} total)</h2>
+        <table>
+          <thead><tr><th>created_at</th><th>Contact</th><th>Payload</th></tr></thead>
+          <tbody>{{sub_rows}}</tbody>
+        </table>
+      </div>
+    </div>
+
   </div>
 
 </main>

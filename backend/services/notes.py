@@ -90,6 +90,59 @@ def list_for_contact(ctx: ServiceContext, contact_id: int) -> list[dict]:
     return out
 
 
+def update(ctx: ServiceContext, note_id: int, *,
+           body: Optional[str] = None, visibility: Optional[str] = None) -> dict:
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    with db() as conn:
+        row = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+        if not row:
+            raise ServiceError("NOTE_NOT_FOUND", f"note {note_id} not found")
+        before = _row_to_dict(row)
+        # Only the author can edit a note (admin too)
+        if before.get("created_by") != ctx.user_id and not ctx.is_admin():
+            raise ServiceError("FORBIDDEN", "only the author or an admin can edit a note")
+        updates = {}
+        if body is not None:
+            if not body.strip():
+                raise ServiceError("VALIDATION_ERROR", "note body cannot be empty")
+            updates["body"] = body
+        if visibility is not None:
+            if visibility not in ("public", "team", "private"):
+                raise ServiceError("VALIDATION_ERROR",
+                                   "visibility must be public|team|private")
+            updates["visibility"] = visibility
+        if not updates:
+            raise ServiceError("VALIDATION_ERROR", "no fields to update")
+        import time as _t
+        updates["updated_at"] = int(_t.time())
+        set_sql = ", ".join(f"{k}=?" for k in updates)
+        conn.execute(f"UPDATE notes SET {set_sql} WHERE id=?",
+                     list(updates.values()) + [note_id])
+        after = _row_to_dict(conn.execute(
+            "SELECT * FROM notes WHERE id=?", (note_id,)
+        ).fetchone())
+        audit.log(conn, ctx, action="note.updated", object_type="note",
+                  object_id=note_id, before=before, after=after)
+    return after
+
+
+def delete(ctx: ServiceContext, note_id: int) -> dict:
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    with db() as conn:
+        row = conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()
+        if not row:
+            raise ServiceError("NOTE_NOT_FOUND", f"note {note_id} not found")
+        before = _row_to_dict(row)
+        if before.get("created_by") != ctx.user_id and not ctx.is_admin():
+            raise ServiceError("FORBIDDEN", "only the author or an admin can delete a note")
+        conn.execute("DELETE FROM notes WHERE id=?", (note_id,))
+        audit.log(conn, ctx, action="note.deleted", object_type="note",
+                  object_id=note_id, before=before)
+    return {"id": note_id, "deleted": True}
+
+
 def reveal_private(ctx: ServiceContext, note_id: int) -> dict:
     """Explicit private-note reveal. Writes an audit row per call."""
     if not ctx.is_admin():

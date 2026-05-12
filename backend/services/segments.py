@@ -334,6 +334,35 @@ def evaluate(ctx: ServiceContext, segment_id: int) -> dict:
             "evaluated": True}
 
 
+def update(ctx: ServiceContext, segment_id: int, payload: dict) -> dict:
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    import json as _json, time as _t
+    with db() as conn:
+        row = conn.execute("SELECT * FROM segments WHERE id=?", (segment_id,)).fetchone()
+        if not row:
+            raise ServiceError("SEGMENT_NOT_FOUND", f"segment {segment_id} not found")
+        before = dict(row)
+        updates = {}
+        if "name" in payload and payload["name"]:
+            updates["name"] = payload["name"].strip()
+        if "rules" in payload and before["type"] == "dynamic":
+            updates["rules_json"] = _json.dumps(payload["rules"] or {})
+        if "description" in payload:
+            updates["description"] = payload["description"] or None
+        if not updates:
+            raise ServiceError("VALIDATION_ERROR", "no fields to update")
+        updates["updated_at"] = int(_t.time())
+        set_sql = ", ".join(f"{k}=?" for k in updates)
+        conn.execute(f"UPDATE segments SET {set_sql} WHERE id=?",
+                     list(updates.values()) + [segment_id])
+        after = dict(conn.execute("SELECT * FROM segments WHERE id=?",
+                                  (segment_id,)).fetchone())
+        audit.log(conn, ctx, action="segment.updated", object_type="segment",
+                  object_id=segment_id, before=before, after=after)
+    return after
+
+
 def delete(ctx: ServiceContext, segment_id: int) -> dict:
     if not ctx.can_write():
         raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
