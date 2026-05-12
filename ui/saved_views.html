@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Saved views · CRM</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+{{topnav}}
+<main class="content">
+
+  <div class="pagebar">
+    <h1>Saved views</h1>
+    <span class="meta">filter + sort + columns combos you can re-load</span>
+  </div>
+
+  <div class="task-tabs">{{entity_tabs}}</div>
+
+  <div class="card">
+    <p class="muted" style="font-size:11.5px; margin-top:0">
+      Showing saved views for <strong>{{entity}}</strong> — yours + everyone's
+      shared. Open a list page (Contacts, Companies, …) to use them inline;
+      this page is just management.
+    </p>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Visibility</th><th>Owner</th><th>Config</th><th></th></tr>
+      </thead>
+      <tbody>{{rows}}</tbody>
+    </table>
+  </div>
+
+</main>
+</body>
+</html>

@@ -352,6 +352,57 @@ def _show_deleted_toggle(show_del: bool, base: str, q: str) -> str:
     return f'<a href="{href}" class="btn secondary" style="padding:3px 10px;font-size:11px">Show deleted</a>'
 
 
+def _saved_views_block(ctx, entity: str, base_path: str, csrf: str,
+                       current_params: dict) -> str:
+    """Render the 'Save current view' + 'Load view' pair for a list page."""
+    from .services import saved_views as _sv
+    import json as _json
+    from urllib.parse import urlencode
+    views = _sv.list_for_entity(ctx, entity)
+    options = ['<option value="">— Load a saved view —</option>']
+    for v in views:
+        try:
+            cfg = _json.loads(v.get("config_json") or "{}")
+        except Exception:
+            cfg = {}
+        qs_load = {k: str(cfg[k]) for k in ("q", "show_deleted") if cfg.get(k) not in (None, "", 0)}
+        qs_load["loaded_view"] = str(v["id"])
+        href = base_path + "?" + urlencode(qs_load)
+        owner = "(mine)" if v.get("user_id") == ctx.user_id else "(shared)"
+        shared_pill = " [shared]" if v.get("shared") else ""
+        options.append(
+            f'<option value="{href}">{_h(v["name"])} {owner}{shared_pill}</option>'
+        )
+    save_qs = {k: v for k, v in current_params.items() if v not in (None, "", 0)}
+    save_qs_json = _json.dumps(save_qs)
+    return (
+        '<div class="saved-views-bar">'
+        f'  <select onchange="if(this.value){{window.location.href=this.value}}">{"".join(options)}</select>'
+        f'  <form method="post" action="/saved-views" style="display:inline">'
+        f'    <input type="hidden" name="csrf" value="{csrf}">'
+        f'    <input type="hidden" name="entity" value="{entity}">'
+        f'    <input type="hidden" name="config_json" value="{_h(save_qs_json)}">'
+        f'    <input type="hidden" name="redirect_to" value="{_h(base_path)}">'
+        f'    <input name="name" placeholder="Save current view as…" style="font-size:12px;padding:4px 8px">'
+        f'    <label style="font-size:11px"><input type="checkbox" name="shared" value="1"> shared</label>'
+        f'    <button class="btn secondary" type="submit" style="padding:3px 10px;font-size:11px">Save</button>'
+        f'  </form>'
+        f'  <a href="/saved-views?entity={entity}" class="muted" style="font-size:11px;margin-left:8px">manage views ›</a>'
+        '</div>'
+    )
+
+
+def _tag_options_html(ctx, scope_filter: str) -> str:
+    """Render <option> list of all tags matching the scope (for bulk apply/remove)."""
+    from .services import tags as _tags
+    all_tags = _tags.list_all(ctx)
+    opts = []
+    for t in all_tags:
+        if t.get("scope") in ("any", scope_filter):
+            opts.append(f'<option value="{t["id"]}">{_h(t["name"])}</option>')
+    return "\n".join(opts) or '<option value="">(no tags yet)</option>'
+
+
 @app.get("/contacts", response_class=HTMLResponse)
 def contacts_page(request: Request, q: str = "", show_deleted: int = 0):
     sess = _require_session(request)
@@ -377,12 +428,14 @@ def contacts_page(request: Request, q: str = "", show_deleted: int = 0):
             row_cls = ""
             name_cell = f'<a href="/contacts/{c["id"]}">{_h(label)}</a>'
         rows.append(
-            f'<tr{row_cls}><td>{name_cell}</td>'
+            f'<tr{row_cls}>'
+            f'<td style="width:28px"><input type="checkbox" name="ids" value="{c["id"]}"></td>'
+            f'<td>{name_cell}</td>'
             f'<td>{_h(c.get("email") or "")}</td>'
             f'<td>{_h(c.get("phone") or "")}</td>'
             f'<td>{_h(c.get("title") or "")} {restore_btn}</td></tr>'
         )
-    rows_html = "\n".join(rows) or '<tr><td colspan="4" class="empty">No contacts yet. Add one below.</td></tr>'
+    rows_html = "\n".join(rows) or '<tr><td colspan="5" class="empty">No contacts yet. Add one below.</td></tr>'
     return HTMLResponse(_render(
         "contacts.html",
         topnav=_topnav("contacts", sess, csrf),
@@ -390,8 +443,40 @@ def contacts_page(request: Request, q: str = "", show_deleted: int = 0):
         total=str(result["total"]),
         q=_h(q),
         show_deleted_toggle=_show_deleted_toggle(show_del, "/contacts", q),
+        tag_options=_tag_options_html(ctx, "contact"),
+        saved_views_bar=_saved_views_block(
+            ctx, "contact", "/contacts", csrf,
+            {"q": q, "show_deleted": ("1" if show_del else "")},
+        ),
         csrf=csrf,
     ))
+
+
+@app.post("/contacts/bulk")
+async def contacts_bulk(request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    form = await request.form()
+    raw_ids = form.getlist("ids")
+    ids = [int(x) for x in raw_ids if str(x).strip().isdigit()]
+    action = form.get("action", "").strip()
+    tag_id = form.get("tag_id") or None
+    try:
+        tag_id_int = int(tag_id) if tag_id else None
+    except ValueError:
+        tag_id_int = None
+    if not ids:
+        return RedirectResponse("/contacts?error=No+rows+selected", status_code=303)
+    try:
+        result = contacts_service.bulk_apply(ctx, ids, action=action, tag_id=tag_id_int)
+    except ServiceError as e:
+        return RedirectResponse(f"/contacts?error={_h(e.message)}", status_code=303)
+    msg = f"{len(result['ok'])} succeeded"
+    if result["errors"]:
+        msg += f", {len(result['errors'])} failed"
+    from urllib.parse import urlencode
+    return RedirectResponse("/contacts?" + urlencode({"info": msg}), status_code=303)
 
 
 @app.post("/contacts/new")
@@ -717,12 +802,14 @@ def companies_page(request: Request, q: str = "", show_deleted: int = 0):
             row_cls = ""
             name_cell = f'<a href="/companies/{c["id"]}">{_h(label)}</a>'
         rows.append(
-            f'<tr{row_cls}><td>{name_cell}</td>'
+            f'<tr{row_cls}>'
+            f'<td style="width:28px"><input type="checkbox" name="ids" value="{c["id"]}"></td>'
+            f'<td>{name_cell}</td>'
             f'<td>{_h(c.get("domain") or "")}</td>'
             f'<td>{_h(c.get("industry") or "")}</td>'
             f'<td>{_h(c.get("location") or "")} {restore_btn}</td></tr>'
         )
-    rows_html = "\n".join(rows) or '<tr><td colspan="4" class="empty">No companies yet. Add one below.</td></tr>'
+    rows_html = "\n".join(rows) or '<tr><td colspan="5" class="empty">No companies yet. Add one below.</td></tr>'
     return HTMLResponse(_render(
         "companies.html",
         topnav=_topnav("companies", sess, csrf),
@@ -730,8 +817,40 @@ def companies_page(request: Request, q: str = "", show_deleted: int = 0):
         total=str(result["total"]),
         q=_h(q),
         show_deleted_toggle=_show_deleted_toggle(show_del, "/companies", q),
+        tag_options=_tag_options_html(ctx, "company"),
+        saved_views_bar=_saved_views_block(
+            ctx, "company", "/companies", csrf,
+            {"q": q, "show_deleted": ("1" if show_del else "")},
+        ),
         csrf=csrf,
     ))
+
+
+@app.post("/companies/bulk")
+async def companies_bulk(request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    form = await request.form()
+    raw_ids = form.getlist("ids")
+    ids = [int(x) for x in raw_ids if str(x).strip().isdigit()]
+    action = form.get("action", "").strip()
+    tag_id = form.get("tag_id") or None
+    try:
+        tag_id_int = int(tag_id) if tag_id else None
+    except ValueError:
+        tag_id_int = None
+    if not ids:
+        return RedirectResponse("/companies?error=No+rows+selected", status_code=303)
+    try:
+        result = companies_service.bulk_apply(ctx, ids, action=action, tag_id=tag_id_int)
+    except ServiceError as e:
+        return RedirectResponse(f"/companies?error={_h(e.message)}", status_code=303)
+    msg = f"{len(result['ok'])} succeeded"
+    if result["errors"]:
+        msg += f", {len(result['errors'])} failed"
+    from urllib.parse import urlencode
+    return RedirectResponse("/companies?" + urlencode({"info": msg}), status_code=303)
 
 
 @app.post("/companies/new")
@@ -1984,6 +2103,125 @@ async def contact_delete_form(contact_id: int, request: Request, csrf: str = For
     except ServiceError:
         pass
     return RedirectResponse("/contacts", status_code=303)
+
+
+# ---------- saved views ----------
+
+@app.get("/saved-views", response_class=HTMLResponse)
+def saved_views_page(request: Request, entity: str = "contact"):
+    sess = _require_session(request)
+    ctx = _ctx_from_session(sess)
+    csrf = auth_mod.csrf_token_for(sess["id"])
+    from .services import saved_views as _sv
+    valid = ("contact", "company", "deal", "task", "interaction")
+    if entity not in valid:
+        entity = "contact"
+    try:
+        views = _sv.list_for_entity(ctx, entity)
+    except ServiceError as e:
+        raise HTTPException(400, e.message)
+    import json as _json
+    rows = []
+    for v in views:
+        try:
+            cfg = _json.loads(v.get("config_json") or "{}")
+        except Exception:
+            cfg = {}
+        is_mine = v.get("user_id") == sess["user_id"]
+        actions = []
+        if is_mine or sess["role"] == "admin":
+            actions.append(
+                f'<form method="post" action="/saved-views/{v["id"]}/toggle-shared" style="display:inline">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<button class="btn secondary" style="padding:2px 8px;font-size:11px">{"Unshare" if v.get("shared") else "Share"}</button>'
+                f'</form>'
+            )
+            actions.append(
+                f'<form method="post" action="/saved-views/{v["id"]}/delete" style="display:inline" '
+                f'      onsubmit="return confirm(\'Delete saved view {_h(v["name"])}?\');">'
+                f'<input type="hidden" name="csrf" value="{csrf}">'
+                f'<button class="btn danger" style="padding:2px 8px;font-size:11px">Delete</button></form>'
+            )
+        rows.append(
+            f'<tr><td>{_h(v["name"])}</td>'
+            f'<td><span class="task-prio prio-{"normal" if v.get("shared") else "low"}">'
+            f'{"shared" if v.get("shared") else "private"}</span></td>'
+            f'<td class="muted">user #{v["user_id"]}{" (you)" if is_mine else ""}</td>'
+            f'<td class="mono" style="font-size:11px">{_h(_json.dumps(cfg))}</td>'
+            f'<td>{" ".join(actions)}</td></tr>'
+        )
+    rows_html = "\n".join(rows) or '<tr><td colspan="5" class="empty">No saved views for this entity yet.</td></tr>'
+    entity_tabs = "".join(
+        f'<a href="/saved-views?entity={e}" class="task-tab{" active" if e == entity else ""}">'
+        f'{e.title()}</a>'
+        for e in valid
+    )
+    return HTMLResponse(_render(
+        "saved_views.html",
+        topnav=_topnav("", sess, csrf),
+        entity_tabs=entity_tabs,
+        entity=entity,
+        rows=rows_html,
+        csrf=csrf,
+    ))
+
+
+@app.post("/saved-views")
+async def saved_view_create_form(
+    request: Request,
+    entity: str = Form(...),
+    name: str = Form(...),
+    config_json: str = Form("{}"),
+    shared: str = Form(""),
+    redirect_to: str = Form("/contacts"),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    import json as _json
+    try:
+        cfg = _json.loads(config_json) if config_json else {}
+    except _json.JSONDecodeError:
+        cfg = {}
+    from .services import saved_views as _sv
+    try:
+        _sv.create(ctx, entity=entity, name=name.strip(),
+                   config=cfg, shared=bool(shared))
+    except ServiceError as e:
+        from urllib.parse import urlencode
+        return RedirectResponse(redirect_to + "?" + urlencode({"error": e.message}),
+                                status_code=303)
+    from urllib.parse import urlencode
+    return RedirectResponse(redirect_to + "?" + urlencode({"info": f"View {name!r} saved"}),
+                            status_code=303)
+
+
+@app.post("/saved-views/{view_id}/delete")
+async def saved_view_delete_form(view_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    from .services import saved_views as _sv
+    try:
+        _sv.delete(ctx, view_id)
+    except ServiceError as e:
+        return RedirectResponse(f"/saved-views?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/saved-views?info=View+deleted", status_code=303)
+
+
+@app.post("/saved-views/{view_id}/toggle-shared")
+async def saved_view_toggle_shared_form(view_id: int, request: Request, csrf: str = Form("")):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    ctx = _ctx_from_session(sess)
+    from .services import saved_views as _sv
+    try:
+        v = _sv.get(ctx, view_id)
+        _sv.update(ctx, view_id, {"shared": not v.get("shared")})
+    except ServiceError as e:
+        return RedirectResponse(f"/saved-views?error={_h(e.message)}", status_code=303)
+    return RedirectResponse("/saved-views?info=Updated", status_code=303)
 
 
 # ---------- settings: webhook delivery log + retry + delete ----------

@@ -170,6 +170,35 @@ a.active { color: var(--grey-10); }
   font-size: 10px; color: var(--grey-7); border: 1px solid var(--grey-3);
   background: transparent;
 }
+
+/* Bulk-action toolbar */
+.bulk-toolbar {
+  display: flex; gap: 8px; align-items: center;
+  padding: 10px 14px; margin: 0 0 12px 0;
+  background: var(--grey-1);
+  border: 1px solid var(--grey-3);
+  font-size: 12px;
+}
+.bulk-toolbar.open {
+  background: var(--blueberry-light, #e7f0fa);
+  border-color: var(--blueberry, #4a87b0);
+}
+.bulk-toolbar .bulk-toolbar-label { margin-right: 6px; }
+.bulk-toolbar select { padding: 4px 8px; font-size: 12px; }
+.bulk-toolbar button { padding: 4px 12px; font-size: 12px; }
+
+/* Saved views bar (above list tables) */
+.saved-views-bar {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  margin: 8px 0 14px 0;
+  padding: 8px 12px;
+  background: var(--grey-1);
+  border: 1px solid var(--grey-3);
+  font-size: 11.5px;
+}
+.saved-views-bar select { font-size: 11.5px; padding: 3px 6px; max-width: 320px; }
+.saved-views-bar input[type=text],
+.saved-views-bar input:not([type]) { font-size: 11.5px; padding: 3px 8px; width: 200px; }
 mark { background: var(--blueberry); color: var(--grey-10); padding: 0 2px; }
 
 /* Contact tag chips */

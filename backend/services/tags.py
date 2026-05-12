@@ -12,6 +12,62 @@ from .contacts import ServiceError
 VALID_SCOPES = ("contact", "company", "any")
 
 
+def update(ctx: ServiceContext, tag_id: int, *,
+           name: Optional[str] = None, color: Optional[str] = None,
+           scope: Optional[str] = None) -> dict:
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    fields = {}
+    if name is not None:
+        nm = name.strip()
+        if not nm:
+            raise ServiceError("VALIDATION_ERROR", "tag name cannot be empty")
+        fields["name"] = nm
+    if color is not None: fields["color"] = color or None
+    if scope is not None:
+        if scope not in VALID_SCOPES:
+            raise ServiceError("VALIDATION_ERROR", f"scope must be one of {VALID_SCOPES}")
+        fields["scope"] = scope
+    if not fields:
+        raise ServiceError("VALIDATION_ERROR", "no updatable fields")
+    with db() as conn:
+        before = conn.execute("SELECT * FROM tags WHERE id=?", (tag_id,)).fetchone()
+        if not before:
+            raise ServiceError("TAG_NOT_FOUND", f"tag {tag_id} not found")
+        before = dict(before)
+        try:
+            set_sql = ", ".join(f"{k}=?" for k in fields)
+            conn.execute(f"UPDATE tags SET {set_sql} WHERE id=?",
+                         list(fields.values()) + [tag_id])
+        except sqlite3.IntegrityError:
+            raise ServiceError("TAG_EXISTS", f"tag name already in use")
+        after = dict(conn.execute("SELECT * FROM tags WHERE id=?", (tag_id,)).fetchone())
+        audit.log(conn, ctx, action="tag.updated", object_type="tag",
+                  object_id=tag_id, before=before, after=after)
+    return after
+
+
+def delete(ctx: ServiceContext, tag_id: int) -> dict:
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    with db() as conn:
+        before = conn.execute("SELECT * FROM tags WHERE id=?", (tag_id,)).fetchone()
+        if not before:
+            raise ServiceError("TAG_NOT_FOUND", f"tag {tag_id} not found")
+        # detach all attachments (cascade on FK already handles this in
+        # schema 0001 but be explicit so we audit the count)
+        n_c = conn.execute("DELETE FROM contact_tags WHERE tag_id=?",
+                           (tag_id,)).rowcount
+        n_co = conn.execute("DELETE FROM company_tags WHERE tag_id=?",
+                            (tag_id,)).rowcount
+        conn.execute("DELETE FROM tags WHERE id=?", (tag_id,))
+        audit.log(conn, ctx, action="tag.deleted", object_type="tag",
+                  object_id=tag_id, before=dict(before),
+                  after={"detached_contacts": n_c, "detached_companies": n_co})
+    return {"id": tag_id, "deleted": True,
+            "detached_contacts": n_c, "detached_companies": n_co}
+
+
 def create(ctx: ServiceContext, name: str, *,
            color: Optional[str] = None, scope: str = "any") -> dict:
     if not ctx.can_write():

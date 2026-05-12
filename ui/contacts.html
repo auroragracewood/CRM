@@ -25,6 +25,8 @@
     <span class="meta" id="list-status" style="font-size:11.5px;color:var(--fg-muted)"></span>
   </form>
 
+  {{saved_views_bar}}
+
   <form class="inline-form" method="post" action="/contacts/new">
     <input type="hidden" name="csrf" value="{{csrf}}">
     <div><label>Full name</label><input name="full_name" placeholder="Maya Sato"></div>
@@ -34,16 +36,42 @@
     <button class="btn" type="submit">Add contact</button>
   </form>
 
-  <table>
-    <thead>
-      <tr><th>Name</th><th>Email</th><th>Phone</th><th>Title</th></tr>
-    </thead>
-    <tbody id="list-rows">
-      {{rows}}
-    </tbody>
-  </table>
+  <form id="bulk-form" method="post" action="/contacts/bulk">
+    <input type="hidden" name="csrf" value="{{csrf}}">
+
+    <div id="bulk-toolbar" class="bulk-toolbar" style="display:none">
+      <span class="bulk-toolbar-label">
+        <strong id="bulk-selected-count">0</strong> selected
+      </span>
+      <select name="action" required>
+        <option value="">— choose action —</option>
+        <option value="tag_apply">Apply tag</option>
+        <option value="tag_remove">Remove tag</option>
+        <option value="delete">Delete (soft-delete)</option>
+        <option value="restore">Restore (undo delete)</option>
+      </select>
+      <select name="tag_id">
+        <option value="">— pick tag (for tag actions) —</option>
+        {{tag_options}}
+      </select>
+      <button class="btn" type="submit">Apply to selected</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:28px"><input type="checkbox" id="bulk-select-all"></th>
+          <th>Name</th><th>Email</th><th>Phone</th><th>Title</th>
+        </tr>
+      </thead>
+      <tbody id="list-rows">
+        {{rows}}
+      </tbody>
+    </table>
+  </form>
 
 </main>
 <script src="/static/list-filter.js" defer></script>
+<script src="/static/list-bulk.js" defer></script>
 </body>
 </html>

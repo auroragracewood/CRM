@@ -253,6 +253,34 @@ def delete(ctx: ServiceContext, contact_id: int) -> dict:
     return {"id": contact_id, "deleted_at": now}
 
 
+def bulk_apply(ctx: ServiceContext, contact_ids: list[int], *,
+               action: str, tag_id: Optional[int] = None) -> dict:
+    """Apply a single action to a list of contact ids. Returns per-id outcome."""
+    if not ctx.can_write():
+        raise ServiceError("FORBIDDEN", "ctx.scope does not allow writes")
+    if action not in ("delete", "restore", "tag_apply", "tag_remove"):
+        raise ServiceError("VALIDATION_ERROR", f"unknown bulk action {action!r}")
+    if action in ("tag_apply", "tag_remove") and not tag_id:
+        raise ServiceError("VALIDATION_ERROR", "tag_id required for tag actions")
+
+    from . import tags as _tags
+    results = {"ok": [], "errors": []}
+    for cid in contact_ids:
+        try:
+            if action == "delete":
+                delete(ctx, cid)
+            elif action == "restore":
+                restore(ctx, cid)
+            elif action == "tag_apply":
+                _tags.attach(ctx, tag_id=tag_id, contact_id=cid)
+            elif action == "tag_remove":
+                _tags.detach(ctx, tag_id=tag_id, contact_id=cid)
+            results["ok"].append(cid)
+        except ServiceError as e:
+            results["errors"].append({"id": cid, "code": e.code, "message": e.message})
+    return results
+
+
 def restore(ctx: ServiceContext, contact_id: int) -> dict:
     """Undo a soft-delete. If the email collides with another active contact,
     the restore fails with CONTACT_EMAIL_EXISTS so the operator can decide
