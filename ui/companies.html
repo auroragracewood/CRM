@@ -11,12 +11,17 @@
 
   <div class="pagebar">
     <h1>Companies</h1>
-    <span class="meta">{{total}} total</span>
+    <span class="meta" id="list-total">{{total}} total</span>
   </div>
 
   <form class="searchbar" method="get" action="/companies">
-    <input type="search" name="q" value="{{q}}" placeholder="Search by name or domain">
-    <button class="btn secondary" type="submit">Search</button>
+    <input id="list-filter-q" type="search" name="q" value="{{q}}"
+           placeholder="Filter by name or domain — results update as you type"
+           autocomplete="off"
+           data-endpoint="/api/companies"
+           data-columns="name,domain,industry,location"
+           data-row-link="/companies">
+    <span class="meta" id="list-status" style="font-size:11.5px;color:var(--fg-muted)"></span>
   </form>
 
   <form class="inline-form" method="post" action="/companies/new">
@@ -32,11 +37,12 @@
     <thead>
       <tr><th>Name</th><th>Domain</th><th>Industry</th><th>Location</th></tr>
     </thead>
-    <tbody>
+    <tbody id="list-rows">
       {{rows}}
     </tbody>
   </table>
 
 </main>
+<script src="/static/list-filter.js" defer></script>
 </body>
 </html>
