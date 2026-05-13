@@ -14,11 +14,18 @@
     <span class="meta">{{total}} group(s) detected</span>
   </div>
 
-  <p class="muted" style="font-size:12px">
-    Each group lists contacts the system thinks might be the same person.
-    Check 2 or more — the first one you check is kept; the rest are merged
-    into it. Interactions, notes, tags, deals, tasks all move; emails free up.
-  </p>
+  <div class="card">
+    <p class="muted" style="font-size:11.5px; margin-top:0">
+      Each group lists contacts the system thinks might be the same person.
+      Detection: exact-email match (after normalization), normalized name +
+      same company, similar-name (Levenshtein) with lower confidence. Check
+      2 or more in a group — the <strong>first checked</strong> wins; the
+      rest are merged into it. Interactions, notes, tags, deals, tasks all
+      move to the winner; the loser's email frees up. Losers are soft-
+      deleted, so a merge is recoverable from
+      <em>/contacts?show_deleted=1</em>.
+    </p>
+  </div>
 
   {{groups}}
 

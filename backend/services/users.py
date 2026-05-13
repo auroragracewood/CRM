@@ -18,6 +18,45 @@ from .contacts import ServiceError, _row_to_dict
 VALID_ROLES = ("admin", "user", "readonly")
 
 
+def create_user(ctx: ServiceContext, *,
+                email: str, password: str,
+                display_name: Optional[str] = None,
+                role: str = "user") -> dict:
+    """Admin-only: create a new user account. New user can sign in
+    immediately with the supplied credentials. Email is normalized to
+    lowercase; collision raises USER_EMAIL_EXISTS."""
+    if not ctx.is_admin():
+        raise ServiceError("FORBIDDEN", "creating users requires admin scope")
+    e = (email or "").strip().lower()
+    if not e or "@" not in e:
+        raise ServiceError("VALIDATION_ERROR", "invalid email")
+    if not password or len(password) < 8:
+        raise ServiceError("VALIDATION_ERROR", "password must be at least 8 characters")
+    if role not in VALID_ROLES:
+        raise ServiceError("VALIDATION_ERROR", f"role must be one of {VALID_ROLES}")
+    now = int(time.time())
+    with db() as conn:
+        clash = conn.execute("SELECT id FROM users WHERE email=?", (e,)).fetchone()
+        if clash:
+            raise ServiceError("USER_EMAIL_EXISTS",
+                               f"email {e!r} already in use",
+                               {"user_id": clash[0]})
+        ph = auth.hash_password(password)
+        conn.execute(
+            "INSERT INTO users (email, password_hash, display_name, role, "
+            "                   created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (e, ph, (display_name or "").strip() or None, role, now, now),
+        )
+        uid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        audit.log(conn, ctx, action="user.created", object_type="user",
+                  object_id=uid,
+                  after={"email": e, "role": role,
+                         "display_name": display_name})
+    return {"id": uid, "email": e, "role": role,
+            "display_name": display_name}
+
+
 def list_(ctx: ServiceContext) -> list[dict]:
     if not ctx.is_admin():
         raise ServiceError("FORBIDDEN", "listing users requires admin scope")

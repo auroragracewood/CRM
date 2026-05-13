@@ -324,6 +324,66 @@ def dashboard(request: Request):
         empty_msg="No new lead activity in 30 days.",
     )
 
+    # Activity feed: last 20 audit events (everyone's, since admins see all
+    # and the dashboard is per-user). For non-admins we limit to their own
+    # actions to keep the view scoped.
+    import time as _t
+    with db() as conn:
+        if sess["role"] == "admin":
+            feed = conn.execute(
+                "SELECT ts, user_id, surface, action, object_type, object_id "
+                "FROM audit_log ORDER BY ts DESC LIMIT 20"
+            ).fetchall()
+        else:
+            feed = conn.execute(
+                "SELECT ts, user_id, surface, action, object_type, object_id "
+                "FROM audit_log WHERE user_id=? ORDER BY ts DESC LIMIT 20",
+                (sess["user_id"],),
+            ).fetchall()
+    _detail_plural = {
+        "contact": "contacts", "company": "companies", "deal": "deals",
+        "task": "tasks", "form": "forms", "segment": "segments",
+        "plugin": "plugins", "webhook": "settings/webhooks",
+        "saved_view": "saved-views", "tag": "tags", "user": "settings/users",
+        "role": "settings/roles", "note": "contacts",
+        "pipeline": "pipelines", "stage": "pipelines",
+        "audit": "audit", "portal_token": "contacts",
+    }
+    def _obj_link(otype, oid):
+        if oid is None:
+            return f'<span class="faint">{_h(otype)}</span>'
+        p = _detail_plural.get(otype)
+        if p and otype != "note":
+            return f'<a href="/{p}/{oid}">{_h(otype)} #{oid}</a>'
+        return f'<span class="mono">{_h(otype)} #{oid}</span>'
+    if feed:
+        feed_rows = "".join(
+            f'<tr><td class="mono faint" style="font-size:11px">'
+            f'{_t.strftime("%H:%M", _t.localtime(r["ts"]))}</td>'
+            f'<td class="mono">{_h(r["action"])}</td>'
+            f'<td>{_obj_link(r["object_type"], r["object_id"])}</td>'
+            f'<td class="muted" style="font-size:11px">{_h(r["surface"])}'
+            + (f' · user #{r["user_id"]}' if sess["role"] == "admin" else "")
+            + '</td></tr>'
+            for r in feed
+        )
+        scope_note = "all users" if sess["role"] == "admin" else "you"
+        feed_widget = (
+            f'<div class="card"><h2>Recent activity '
+            f'<span class="muted" style="font-size:11px;font-weight:400">'
+            f'· last 20 events · {scope_note}</span></h2>'
+            f'<table><thead><tr><th>at</th><th>action</th><th>object</th>'
+            f'<th>via</th></tr></thead><tbody>{feed_rows}</tbody></table>'
+            f'<p style="text-align:right;margin-top:6px;font-size:11px">'
+            f'<a href="/audit">Full audit log →</a></p></div>'
+        )
+    else:
+        feed_widget = (
+            '<div class="card"><h2>Recent activity</h2>'
+            '<div class="empty" style="padding:14px">'
+            'Nothing has been logged yet. Mutations will appear here.</div></div>'
+        )
+
     return HTMLResponse(_render(
         "dashboard.html",
         topnav=_topnav("home", sess, csrf),
@@ -337,6 +397,7 @@ def dashboard(request: Request):
         forms_widget=forms_widget,
         deals_widget=deals_widget,
         leads_widget=leads_widget,
+        feed_widget=feed_widget,
     ))
 
 
@@ -2279,7 +2340,7 @@ async def me_session_revoke_form(session_id: str, request: Request, csrf: str = 
 
 
 @app.get("/settings/users", response_class=HTMLResponse)
-def admin_users_page(request: Request):
+def admin_users_page(request: Request, created: str = ""):
     sess = _require_session(request)
     if sess["role"] != "admin":
         raise HTTPException(403, "admin only")
@@ -2313,6 +2374,33 @@ def admin_users_page(request: Request):
         rows=rows_html,
         csrf=csrf,
     ))
+
+
+@app.post("/settings/users/new")
+async def admin_user_create_form(
+    request: Request,
+    email: str = Form(""),
+    display_name: str = Form(""),
+    password: str = Form(""),
+    role: str = Form("user"),
+    csrf: str = Form(""),
+):
+    sess = _require_session(request)
+    _csrf_check(request, sess, csrf)
+    if sess["role"] != "admin":
+        raise HTTPException(403, "admin only")
+    ctx = _ctx_from_session(sess)
+    from .services import users as users_svc
+    try:
+        u = users_svc.create_user(
+            ctx, email=email, password=password,
+            display_name=display_name or None, role=role,
+        )
+    except ServiceError as e:
+        return RedirectResponse(f"/settings/users?error={_h(e.message)}", status_code=303)
+    return RedirectResponse(
+        f"/settings/users?info=User+%23{u['id']}+created", status_code=303,
+    )
 
 
 @app.post("/settings/users/{user_id}/role")
@@ -2687,7 +2775,8 @@ async def stage_delete_form(stage_id: int, request: Request,
 
 @app.post("/forms/{form_id}/edit")
 async def form_edit_form(form_id: int, request: Request,
-                          name: str = Form(""), schema_json: str = Form(""),
+                          name: str = Form(""),
+                          form_schema_json: str = Form("", alias="schema_json"),
                           routing_json: str = Form(""),
                           active: str = Form(""),
                           csrf: str = Form("")):
@@ -2697,9 +2786,9 @@ async def form_edit_form(form_id: int, request: Request,
     import json as _json
     payload = {}
     if name.strip(): payload["name"] = name.strip()
-    if schema_json.strip():
+    if form_schema_json.strip():
         try:
-            payload["schema"] = _json.loads(schema_json)
+            payload["schema"] = _json.loads(form_schema_json)
         except _json.JSONDecodeError as e:
             return RedirectResponse(
                 f"/forms/{form_id}?error=Invalid+schema+JSON:+{_h(str(e))}",

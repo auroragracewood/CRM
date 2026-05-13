@@ -14,6 +14,16 @@
     <span class="meta">pre-built queries · JSON + CSV outputs · no LLM</span>
   </div>
 
+  <div class="card">
+    <p class="muted" style="font-size:11.5px; margin-top:0">
+      Every report is a pure function in <code>services/reports.py</code>. Click
+      <strong>Run</strong> to see the result inline, or <strong>CSV</strong> to
+      download. Reports are reads — they don't write to the audit log, don't
+      fire webhooks, don't dispatch plug-ins. Add new ones by editing
+      <code>services/reports.py</code>; they appear here automatically.
+    </p>
+  </div>
+
   {{result}}
 
   <div class="reports-grid">
