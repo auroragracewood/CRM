@@ -218,6 +218,77 @@ a.active { color: var(--grey-10); }
 }
 
 
+/* ===== Guided tour ===== */
+.crm-tour-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 900;
+}
+.crm-tour-spotlight {
+  position: absolute;
+  box-shadow:
+    0 0 0 9999px rgba(0,0,0,0.55),
+    0 0 0 2px var(--blueberry, #4a87b0);
+  z-index: 1000;
+  pointer-events: none;
+  background: transparent;
+}
+.crm-tour-tooltip {
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+  padding: 16px 18px;
+  font-size: 13px;
+  color: var(--fg);
+  z-index: 1010;
+  max-width: 360px;
+}
+.crm-tour-tooltip h4 {
+  margin: 0 0 6px 0;
+  font-size: 14px;
+}
+.crm-tour-tooltip .crm-tour-progress {
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.crm-tour-tooltip .crm-tour-body {
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+.crm-tour-tooltip .crm-tour-body code {
+  font-size: 11.5px;
+  background: var(--grey-1, #f0f0f0);
+  padding: 1px 4px;
+}
+.crm-tour-tooltip .actions {
+  display: flex; gap: 6px; justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.crm-tour-tooltip .actions button {
+  font-size: 11.5px; padding: 4px 12px;
+}
+.crm-tour-pill {
+  border-color: var(--blueberry, #4a87b0);
+}
+
+/* The ? button in the topnav */
+.topbar .tour-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  font-size: 12px; font-weight: 700;
+  background: var(--grey-2); color: var(--grey-10);
+  border: 1px solid var(--grey-3);
+  text-decoration: none;
+  margin-right: 8px;
+  cursor: pointer;
+}
+.topbar .tour-toggle:hover { background: var(--blueberry, #4a87b0); }
+
+
 /* Themed confirmation modal (replaces browser confirm() opt-in) */
 .crm-modal-backdrop {
   position: fixed; inset: 0;
