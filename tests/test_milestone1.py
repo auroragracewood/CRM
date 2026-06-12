@@ -49,9 +49,14 @@ def _setup_temp_db():
     sys.path.insert(0, str(ROOT))
     from backend import auth as auth_mod
     from backend.db import apply_schema, db
+    from backend.migrations import run_pending as run_migrations
 
     schema_sql = (ROOT / "schema.sql").read_text(encoding="utf-8")
     apply_schema(schema_sql)
+    # Apply all migrations on top of the v0 baseline so the test DB matches
+    # current production schema (otherwise v4.1 columns like contacts.birthday
+    # are missing and contacts.create() fails on insert).
+    run_migrations(verbose=False)
 
     now = int(time.time())
     admin_pw = "test-password-1234"

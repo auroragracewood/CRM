@@ -4,18 +4,41 @@
 <meta charset="utf-8">
 <title>Sign in · CRM</title>
 <link rel="stylesheet" href="/static/styles.css">
+<script src="/static/theme.js" defer></script>
 </head>
-<body>
+<body class="login-page">
+<a href="#" class="theme-toggle theme-toggle-floating" title="Toggle theme">◐</a>
 <div class="login-shell">
   <div class="login-card">
-    <div class="brand">CRM</div>
-    <h1>Sign in to continue</h1>
+    <div class="login-brand">
+      <div class="login-brand-mark">CRM</div>
+      <div>
+        <div class="login-brand-name">CRM</div>
+        <div class="login-brand-tag">Open-source · self-hosted · agent-ready</div>
+      </div>
+    </div>
+    <h1>Sign in</h1>
     {{error}}
-    <form method="post" action="/login" autocomplete="on">
-      <div class="row"><label>Email</label><input type="email" name="email" autofocus required></div>
-      <div class="row"><label>Password</label><input type="password" name="password" required></div>
-      <div class="row"><label></label><button class="btn" type="submit">Sign in</button></div>
+    {{demo}}
+    <form id="login-form" method="post" action="/login" autocomplete="on">
+      <div class="row">
+        <label for="login-email">Email</label>
+        <input id="login-email" type="email" name="email" autofocus required>
+      </div>
+      <div class="row">
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" name="password" required>
+      </div>
+      <div class="row submit-row">
+        <button class="btn btn-primary" type="submit">Sign in →</button>
+      </div>
     </form>
+    <div class="login-footer">
+      <p class="login-tip">
+        Single-company CRM with REST + CLI + MCP + plug-ins. Every action a
+        human takes is also callable by an agent. No vendor lock-in.
+      </p>
+    </div>
   </div>
 </div>
 </body>

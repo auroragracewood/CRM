@@ -77,13 +77,33 @@ CRM/
 python -m pip install -r requirements.txt
 python setup.py --non-interactive --admin-email a@b.c --admin-password test1234
 python seed_demo.py
-python -m tests.test_milestone1   # full M1+M2 acceptance test
+python -m tests.run_all           # full acceptance suite (8 files, ~20s)
 python server.py                  # browse http://127.0.0.1:8765/
 ```
 
-The acceptance test creates a contact through service / REST / CLI / MCP and
-verifies audit rows + outbox events. If you change anything in the core
-service layer, run it first.
+### Test suite layout
+
+Eight acceptance files under `tests/`, run individually OR all together via
+`python -m tests.run_all`. Each file is self-contained (temp DB, own setup).
+The runner runs them as subprocesses in priority order — if a baseline file
+fails (migrations, M1), the failure surfaces first so you debug at the
+right layer.
+
+| File | Coverage |
+|---|---|
+| `test_migrations.py` | runner contract + post-migration table presence + idempotency |
+| `test_milestone1.py` | M1 (contacts × 4 surfaces) + M2 (companies/interactions/notes/tags/consent) |
+| `test_v1plus.py` | v1+ services (pipelines/deals/tasks/forms/segments/saved_views/scoring/plugins) + plug-in end-to-end proof |
+| `test_services_coverage.py` | auth_keys / users / roles / search (FTS5) / duplicates / imports / inbound (HMAC) / portals / reports |
+| `test_error_paths.py` | every documented error code raises correctly across 13 services |
+| `test_transports.py` | REST + CLI + MCP for deals & tasks (transport wiring pinned) |
+| `test_webhook_delivery.py` | full webhook pipeline: enqueue → HMAC sign → 200=delivered, 5xx=retrying with backoff, exhaust=failed, event-type filter |
+| `test_contact_lifecycle.py` | soft-delete → email reuse → restore (proves the partial unique email index works as intended) |
+
+If you change anything in the core service layer, run `python -m tests.run_all`
+before committing — total wall-clock is ~20 seconds and it catches schema
+drift, error-code regressions, transport-wiring breaks, and webhook contract
+violations in one shot.
 
 ## Database — what's there
 
@@ -155,7 +175,10 @@ relationships:
 8. `agent_surface/skills/<verb>-product.md` — skill markdown for agents.
 9. `docs/data-model.md`, `docs/api.md`, `docs/mcp.md`, `docs/cli.md`,
    `docs/skills.md` — update.
-10. Extend `tests/test_milestone1.py` to cover the new entity end-to-end.
+10. Extend the test suite — add the new entity to `tests/test_v1plus.py` (or
+    a new file picked up by `tests/run_all.py`). Also exercise its
+    documented error codes in `tests/test_error_paths.py`. If it gains REST
+    handlers, add a block to `tests/test_transports.py`.
 
 Once you have it working through one surface, the others should be
 ~30 minutes of mirror code each.
@@ -164,8 +187,48 @@ Once you have it working through one surface, the others should be
 
 Drop a `.py` file in `agent_surface/plugins/`. Required: `NAME` constant.
 Optional: any hook function from `plugins.KNOWN_HOOKS` as a top-level
-callable. See `agent_surface/plugins/README.md` and `example_fit_score.py`
-+ `auto_tag_from_interactions.py` for working examples.
+callable. See `agent_surface/plugins/README.md` and these working examples:
+
+- `example_fit_score.py` — implements `compute_fit_score` (return-value hook)
+  and `on_contact_created` (side-effect hook). Tag-pattern-based ICP scoring.
+- `auto_tag_from_interactions.py` — listens for `on_interaction_logged`,
+  extracts topic tags from title+body using either Claude (if
+  `ANTHROPIC_API_KEY` is set) or a heuristic keyword extractor. Auto-tags
+  the contact with `topic:<word>` labels.
+- `deal_stage_automation.py` — listens for `on_deal_stage_changed`. On a
+  won-stage transition, creates a "Kickoff + thank-you" task (priority=high)
+  on the deal's contact. On a lost-stage transition, creates a "Postmortem"
+  task (priority=normal). Logs a system interaction on the contact for every
+  stage change. Demonstrates **the 5-arg hook signature** (ctx, deal,
+  from_stage, to_stage, conn) and cross-service mutation inside a hook's
+  transaction (writes to `tasks` + `interactions` atomically with the parent
+  deal update). `test_v1plus.py` block [9/9] exercises this end-to-end.
+
+**Important pattern**: hooks receive the same `conn` the triggering service is
+using. Use it directly with `conn.execute(...)` rather than calling another
+service function (which would open a second connection — risk of deadlocks
+on SQLite, and the nested service's own webhook/audit logic fires mid-flight
+on the parent transaction). All three example plug-ins pattern this correctly.
+
+## In-app guided tour
+
+`ui/tour.js` (~750 lines) implements a 28-step walk-through of every page.
+A `?` icon in the topnav opens it; state persists across page navigation
+via `localStorage` (`crm_tour_active`, `crm_tour_step`, `crm_tour_dismissed`,
+`crm_tour_seen`). The tour spotlights an element via CSS box-shadow trick,
+positions a tooltip with Skip/Restart/Next actions, and shows a "Continue ›"
+pill when the user has navigated away from the step's intended URL.
+
+Every step's body is structured the same way:
+1. **Lead paragraph** — what this page/feature does in plain English.
+2. **"For dummies" callout** — a `.dummies` box with a non-CRM analogy
+   ("like a Trello board," "like browser extensions," "like Spotlight on Mac").
+3. **"Use it for:" bullet list** — 2-3 concrete, real-world use cases.
+4. **Optional `.tip` line** — power-user note in italic.
+
+To add or edit content: edit the `TOUR` array in `ui/tour.js`. Each entry is
+`{url, selector, title, body}`. The first-time offer on the dashboard prompts
+new users; the `?` icon in the topnav is permanent.
 
 ## Sticky constraints — don't break these
 

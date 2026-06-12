@@ -14,25 +14,41 @@
     <span class="meta">{{email}} · {{role}}</span>
   </div>
 
-  <div class="card">
-    <h2>Admin areas</h2>
+  <nav class="settings-strip">
+    <a href="#account">Account</a>
+    <a href="#api-keys">API keys</a>
+    <a href="#webhooks">Webhooks</a>
+    <a href="#data">Import / Export</a>
+    <a href="#team">Team &amp; access</a>
+    <a href="#observability">Observability</a>
+  </nav>
+
+  <section id="account" class="card settings-section">
+    <div class="settings-section-head">
+      <span class="settings-icon">👤</span>
+      <div>
+        <h2>Account</h2>
+        <p class="muted">Your personal settings — email, password, sessions, role assignments.</p>
+      </div>
+    </div>
     <div class="actions" style="flex-wrap:wrap">
       <a class="btn secondary" href="/me">My profile</a>
-      <a class="btn secondary" href="/settings/users">Users</a>
-      <a class="btn secondary" href="/settings/roles">Roles &amp; permissions</a>
-      <a class="btn secondary" href="/audit">Audit log</a>
-      <a class="btn secondary" href="/tags">Tags</a>
     </div>
-  </div>
+  </section>
 
   {{new_key_block}}
 
-  <div class="card">
-    <h2>API keys</h2>
-    <p class="muted" style="font-size:12px; margin-top:0">
-      Bearer tokens for agent access (REST, MCP, CLI when remote). The raw key is shown
-      ONCE at creation; only the prefix and a hash are stored.
-    </p>
+  <section id="api-keys" class="card settings-section">
+    <div class="settings-section-head">
+      <span class="settings-icon">🔑</span>
+      <div>
+        <h2>API keys</h2>
+        <p class="muted">
+          Bearer tokens for agent access (REST, MCP, CLI when remote). The raw key is shown
+          <strong>once</strong> at creation; only the prefix and a hash are stored.
+        </p>
+      </div>
+    </div>
 
     <form class="inline-form" method="post" action="/settings/keys/new" style="grid-template-columns: 2fr 1fr auto">
       <input type="hidden" name="csrf" value="{{csrf}}">
@@ -55,30 +71,19 @@
         {{key_rows}}
       </tbody>
     </table>
-  </div>
+  </section>
 
-  <div class="card">
-    <h2>Import / Export</h2>
-    <p class="muted" style="font-size:12px; margin-top:0">
-      <strong>Import</strong> via the CLI (file-upload over REST is intentionally not in v0):
-      <code>python -m agent_surface.cli import --kind contacts --csv /path/contacts.csv [--dry-run]</code><br>
-      <strong>Export</strong> streams CSV — click a button below to download (uses your session cookie, no extra auth):
-    </p>
-    <div class="actions" style="flex-wrap: wrap">
-      <a class="btn secondary" href="/api/export/contacts.csv">Contacts</a>
-      <a class="btn secondary" href="/api/export/companies.csv">Companies</a>
-      <a class="btn secondary" href="/api/export/deals.csv">Deals</a>
-      <a class="btn secondary" href="/api/export/tasks.csv">Tasks</a>
-      <a class="btn secondary" href="/api/export/interactions.csv">Interactions</a>
+  <section id="webhooks" class="card settings-section">
+    <div class="settings-section-head">
+      <span class="settings-icon">📡</span>
+      <div>
+        <h2>Webhooks</h2>
+        <p class="muted">
+          Outbound subscriptions. Events fire via the outbox pattern: enqueued in the same
+          transaction as the data change, delivered with HMAC-SHA256 signing and exponential-backoff retry.
+        </p>
+      </div>
     </div>
-  </div>
-
-  <div class="card">
-    <h2>Webhooks</h2>
-    <p class="muted" style="font-size:12px; margin-top:0">
-      Outbound subscriptions. Events fire via the outbox pattern: enqueued in the same
-      transaction as the data change, delivered with HMAC-SHA256 signing and retry.
-    </p>
 
     <form class="inline-form" method="post" action="/settings/webhooks/new" style="grid-template-columns: 2fr 1fr auto">
       <input type="hidden" name="csrf" value="{{csrf}}">
@@ -95,7 +100,56 @@
         {{wh_rows}}
       </tbody>
     </table>
-  </div>
+  </section>
+
+  <section id="data" class="card settings-section">
+    <div class="settings-section-head">
+      <span class="settings-icon">📦</span>
+      <div>
+        <h2>Import / Export</h2>
+        <p class="muted">
+          <strong>Import</strong> via the CLI (file-upload over REST is intentionally not in v0):<br>
+          <code>python -m agent_surface.cli import --kind contacts --csv /path/contacts.csv [--dry-run]</code><br>
+          <strong>Export</strong> streams CSV — click any entity to download (uses your session cookie, no extra auth).
+        </p>
+      </div>
+    </div>
+    <div class="actions" style="flex-wrap: wrap">
+      <a class="btn secondary" href="/api/export/contacts.csv">Contacts.csv</a>
+      <a class="btn secondary" href="/api/export/companies.csv">Companies.csv</a>
+      <a class="btn secondary" href="/api/export/deals.csv">Deals.csv</a>
+      <a class="btn secondary" href="/api/export/tasks.csv">Tasks.csv</a>
+      <a class="btn secondary" href="/api/export/interactions.csv">Interactions.csv</a>
+    </div>
+  </section>
+
+  <section id="team" class="card settings-section">
+    <div class="settings-section-head">
+      <span class="settings-icon">👥</span>
+      <div>
+        <h2>Team &amp; access</h2>
+        <p class="muted">Manage who can sign in and what permissions they have.</p>
+      </div>
+    </div>
+    <div class="actions" style="flex-wrap:wrap">
+      <a class="btn secondary" href="/settings/users">Users</a>
+      <a class="btn secondary" href="/settings/roles">Roles &amp; permissions</a>
+    </div>
+  </section>
+
+  <section id="observability" class="card settings-section">
+    <div class="settings-section-head">
+      <span class="settings-icon">📜</span>
+      <div>
+        <h2>Observability</h2>
+        <p class="muted">See what happened, when, by whom — and label things for later.</p>
+      </div>
+    </div>
+    <div class="actions" style="flex-wrap:wrap">
+      <a class="btn secondary" href="/audit">Audit log</a>
+      <a class="btn secondary" href="/tags">Tags</a>
+    </div>
+  </section>
 
 </main>
 </body>

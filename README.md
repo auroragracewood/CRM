@@ -1,13 +1,76 @@
-# CRM
+# CRM — A CRM you actually own
 
-> An open-source, self-hostable customer relations management
-> application designed for agent-driven workflows.
+> Open-source · self-hosted · agent-ready · zero vendor lock-in
+
+A modern customer-relations management application built so every action a
+human takes is also callable by a machine. Drop the binary on your own
+server, point a browser at it, and you have a multi-surface CRM that
+talks to Claude / Codex / your custom agents through the same plumbing
+your team uses.
+
+```
+              ┌──────────────────────────────────────┐
+              │   UI · REST · MCP · CLI · webhooks   │
+              │   forms · inbound · portals · cron   │
+              └──────────────────────────────────────┘
+                              ▼
+                ┌──────────────────────────┐
+                │   backend/services/*     │   ← single source of truth
+                │   audit + webhooks + hooks│
+                └──────────────────────────┘
+                              ▼
+                         SQLite (31 tables)
+```
+
+### Why this exists
+
+Most CRMs are SaaS rent-traps with a clunky REST API bolted on as an
+afterthought. **CRM inverts that:** the service layer is the product,
+and the UI is just one of seven equally-capable surfaces calling it.
+Your AI agent, your shell script, and your team member all run through
+the same code path with the same audit trail.
 
 **The CRM is the body. The agent is the brain.** The body has nerve
 endings — UI, REST API, MCP server, CLI, skills, webhooks, cron,
 plug-ins. Whatever agent harness you wire in (Claude Code, OpenClaw,
-Codex, custom orchestrators) pulls the levers. The CRM ships no LLM,
-no provider keys, no prompt logic.
+Codex, custom orchestrators) pulls the levers. The CRM ships **no LLM,
+no provider keys, no prompt logic** — you bring your own brain.
+
+### At a glance
+
+- 🏗️ **FastAPI + SQLite + vanilla JS** — no Docker, no Postgres, no build step
+- 🎨 **Polished UI** — dark mode, keyboard shortcuts, 28-step guided tour, styled error pages, mobile-responsive
+- 🔒 **Audit log on every mutation** — same-transaction, includes user/api-key, surface, before/after, request_id
+- 📤 **Webhook outbox** — HMAC-SHA256 signed, retry with backoff, never blocks the user
+- 🧩 **Drop-in plug-ins** — Python files in `agent_surface/plugins/`, hot-reloaded, with full event hook coverage
+- 🤖 **Agent-native** — REST + CLI + MCP + skills surfaces, all backed by the same service layer
+- ✅ **8 acceptance test files, ~20s full suite** — service / transport / error-paths / webhook delivery / migrations all covered
+- 📊 **31 tables, ~95 REST endpoints, 60+ CLI commands, ~40 MCP tools** — and growing
+
+Run `python -m tests.run_all` to verify a fresh install works end-to-end.
+
+## Demo mode (portfolio / public deployments)
+
+Want visitors to walk straight in? Create the well-known demo account:
+
+```bash
+python seed_demo.py        # demo data AND the demo user
+```
+
+That creates **`demo@crm.local` / `demo1234`** (admin). When this account
+exists, the sign-in page automatically shows the credentials and a
+one-click **"Sign in as demo"** button. Self-hosters who never create the
+account never see the banner — no config flag needed.
+
+Admin account management is also available from the CLI:
+
+```bash
+python -m agent_surface.cli user list
+python -m agent_surface.cli user create --email a@b.c --password ... --role admin
+python -m agent_surface.cli user set-password --id 2 --password newpass123   # admin reset
+python -m agent_surface.cli user set-role --id 2 --role readonly
+```
+
 
 ## What's in it
 
@@ -51,8 +114,8 @@ cd crm
 python -m venv .venv && source .venv/bin/activate    # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 python setup.py                  # prompts for first admin user
-uvicorn backend.main:app --reload
-# open http://localhost:8000
+python server.py                 # or: CRM_PORT=9000 python server.py
+# open http://localhost:8765
 ```
 
 Optional: `python seed_demo.py` to populate the database with
@@ -66,7 +129,7 @@ After install, the same action runs through any of:
 
 | Surface | Use |
 | --- | --- |
-| **UI** | `http://localhost:8000/` — browser, cookie sessions |
+| **UI** | `http://localhost:8765/` — browser, cookie sessions, dark mode, ⌨ shortcuts |
 | **REST API** | `/api/*` with `Authorization: Bearer <key>` (~95 endpoints) |
 | **CLI** | `python -m agent_surface.cli ...` (18 command groups) |
 | **MCP** | `python -m agent_surface.mcp_server` (FastMCP or stdio) |

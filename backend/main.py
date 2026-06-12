@@ -13,6 +13,7 @@ from typing import Optional
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import auth as auth_mod
 from . import webhooks as webhooks_mod
@@ -49,6 +50,81 @@ DOCS_DIR = ROOT / "docs"
 app = FastAPI(title="CRM", version="0.1")
 app.include_router(api_router)
 app.mount("/static", StaticFiles(directory=str(UI_DIR)), name="static")
+
+
+# ---------- styled HTML error pages ----------
+#
+# By default FastAPI returns raw JSON / `Internal Server Error` text on
+# unhandled exceptions and 404s. That looks broken to a portfolio reviewer.
+# These handlers render proper styled HTML pages for UI routes while leaving
+# /api/* responses as JSON so machine clients aren't surprised.
+
+_ERROR_PAGE_TEMPLATE = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>{code} · CRM</title>
+<link rel="stylesheet" href="/static/styles.css"></head>
+<body class="error-page">
+<main class="content content-narrow">
+  <div class="error-card">
+    <div class="error-code">{code}</div>
+    <h1>{title}</h1>
+    <p class="error-detail">{detail}</p>
+    <div class="error-actions">
+      <a href="/" class="btn">Back to dashboard</a>
+      <a href="javascript:history.back()" class="btn secondary">Go back</a>
+    </div>
+  </div>
+</main></body></html>"""
+
+_ERROR_LABELS = {
+    400: ("Bad request",       "We couldn't process that request."),
+    401: ("Sign in needed",    "You need to be signed in to view that page."),
+    403: ("Not allowed",       "You don't have permission for that action."),
+    404: ("Page not found",    "We couldn't find what you were looking for."),
+    405: ("Method not allowed","That action isn't supported on this URL."),
+    409: ("Conflict",          "That conflicts with existing data."),
+    410: ("Gone",              "That resource is no longer available."),
+    422: ("Unprocessable",     "The form data was invalid."),
+    429: ("Too many requests", "Slow down a moment and try again."),
+    500: ("Something broke",   "The server tripped on that one. Sorry."),
+    503: ("Service unavailable","The CRM isn't ready yet. Run `python setup.py`."),
+}
+
+def _is_api_path(request: "Request") -> bool:
+    p = request.url.path or ""
+    return p.startswith("/api/") or p.startswith("/in/") or p.startswith("/f/api/")
+
+@app.exception_handler(StarletteHTTPException)
+async def _html_http_exception_handler(request: "Request", exc: StarletteHTTPException):
+    # Don't intercept FastAPI's intended 307 redirect (we use it to bounce
+    # un-authed users to /login). Same for 302/303.
+    if 300 <= exc.status_code < 400:
+        return Response(status_code=exc.status_code, headers=exc.headers or {})
+    if _is_api_path(request):
+        return JSONResponse(
+            {"ok": False, "error": {"code": exc.status_code, "message": exc.detail}},
+            status_code=exc.status_code, headers=exc.headers or {},
+        )
+    title, fallback = _ERROR_LABELS.get(
+        exc.status_code, ("Error", "Something went wrong."))
+    detail = _h(str(exc.detail)) if exc.detail else fallback
+    return HTMLResponse(
+        _ERROR_PAGE_TEMPLATE.format(code=exc.status_code, title=title, detail=detail),
+        status_code=exc.status_code,
+        headers=exc.headers or {},
+    )
+
+@app.exception_handler(Exception)
+async def _html_unhandled_exception_handler(request: "Request", exc: Exception):
+    if _is_api_path(request):
+        return JSONResponse(
+            {"ok": False, "error": {"code": 500, "message": "internal server error"}},
+            status_code=500,
+        )
+    title, fallback = _ERROR_LABELS[500]
+    return HTMLResponse(
+        _ERROR_PAGE_TEMPLATE.format(code=500, title=title, detail=fallback),
+        status_code=500,
+    )
 
 
 # ---------- one-shot flash for issued portal tokens (security) ----------
@@ -99,10 +175,33 @@ def _h(s) -> str:
     return html.escape(str(s) if s is not None else "")
 
 
+# Standard <head> additions injected into every rendered page so each HTML
+# template doesn't have to repeat them. Viewport + favicon + theme-color +
+# prefers-color-scheme (lets the browser pick light/dark fonts during the
+# initial paint, eliminating the white flash on dark-mode laptops).
+_HEAD_INJECT = (
+    '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+    '<meta name="color-scheme" content="light dark">'
+    '<meta name="theme-color" content="#fafaf7" media="(prefers-color-scheme: light)">'
+    '<meta name="theme-color" content="#0b0d14" media="(prefers-color-scheme: dark)">'
+    # SVG favicon — emoji-based so no external file needed.
+    '<link rel="icon" type="image/svg+xml" '
+    'href="data:image/svg+xml,'
+    '%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E'
+    '%3Crect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%230b0d14%22/%3E'
+    '%3Ctext x=%2232%22 y=%2244%22 font-size=%2228%22 text-anchor=%22middle%22 '
+    'font-family=%22-apple-system,system-ui,sans-serif%22 font-weight=%22800%22 '
+    'letter-spacing=%22-1%22 '
+    'fill=%22%23fafaf7%22%3ECRM%3C/text%3E%3C/svg%3E">'
+)
+
 def _render(template_name: str, **kwargs) -> str:
     txt = _tpl(template_name)
     for k, v in kwargs.items():
         txt = txt.replace("{{" + k + "}}", v if isinstance(v, str) else str(v))
+    # Inject standard head additions just before </head>.
+    if "</head>" in txt and "name=\"viewport\"" not in txt:
+        txt = txt.replace("</head>", _HEAD_INJECT + "</head>", 1)
     return txt
 
 
@@ -164,11 +263,15 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
         '<script src="/static/topnav.js" defer></script>'
         '<script src="/static/modal.js" defer></script>'
         '<script src="/static/tour.js" defer></script>'
+        '<script src="/static/theme.js" defer></script>'
+        '<script src="/static/shortcuts.js" defer></script>'
+        '<script src="/static/toast.js" defer></script>'
+        '<a href="#" class="theme-toggle" title="Toggle theme">◐</a>'
         '<a href="#" class="tour-toggle" data-action="start-tour" '
         '   title="Start guided tour">?</a>'
         '<form method="post" action="/logout" style="display:inline">'
         f'<input type="hidden" name="csrf" value="{csrf}">'
-        f'<a href="/me" class="user" style="text-decoration:none;color:inherit">{_h(sess["email"])}<span class="role">{_h(sess["role"])}</span></a> '
+        f'<a href="/me" class="user" style="text-decoration:none;color:inherit"><span class="email">{_h(sess["email"])}</span><span class="role">{_h(sess["role"])}</span></a> '
         '<button class="btn secondary" style="margin-left:10px" type="submit">Sign out</button>'
         '</form>'
         '</header>'
@@ -177,12 +280,40 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
 
 # ---------- login / logout ----------
 
+DEMO_EMAIL = "demo@crm.local"
+DEMO_PASSWORD = "demo1234"  # shown openly on the login page when the demo account exists
+
+
+def _demo_banner() -> str:
+    """If the well-known demo account exists, advertise its credentials above
+    the login form (portfolio/demo deployments). Self-hosters simply never
+    create demo@crm.local and the banner never renders."""
+    with db() as conn:
+        row = conn.execute("SELECT 1 FROM users WHERE email = ?", (DEMO_EMAIL,)).fetchone()
+    if not row:
+        return ""
+    fill_js = (
+        "document.getElementById('login-email').value='" + DEMO_EMAIL + "';"
+        "document.getElementById('login-password').value='" + DEMO_PASSWORD + "';"
+        "document.getElementById('login-form').submit()"
+    )
+    return (
+        '<div class="login-demo">'
+        '<div class="login-demo-title">Try the live demo</div>'
+        f'<div class="login-demo-creds">Email: <code>{DEMO_EMAIL}</code> &middot; '
+        f'Password: <code>{DEMO_PASSWORD}</code></div>'
+        f'<button type="button" class="btn login-demo-fill" onclick="{fill_js}">'
+        'Sign in as demo &rarr;</button>'
+        '</div>'
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request, error: str = ""):
     err_html = (
         f'<div class="err">{_h(error)}</div>' if error else ""
     )
-    return HTMLResponse(_render("login.html", error=err_html))
+    return HTMLResponse(_render("login.html", error=err_html, demo=_demo_banner()))
 
 
 @app.post("/login")
@@ -387,9 +518,32 @@ def dashboard(request: Request):
             'Nothing has been logged yet. Mutations will appear here.</div></div>'
         )
 
+    # First-run onboarding card — shown when the CRM has zero or very few
+    # real records. Gives a brand-new user something to do besides stare at
+    # six empty widgets.
+    if contact_count == 0 and company_count == 0 and open_deals == 0:
+        onboarding = (
+            '<div class="onboarding-card">'
+            '<div class="ob-icon">👋</div>'
+            '<div class="ob-text">'
+            '<h2>Welcome to your CRM</h2>'
+            '<p>Empty CRMs feel pointless — get something in here to see the '
+            'features come alive. Pick a starting move below, or hit the '
+            '<strong>?</strong> in the top bar for a 28-step guided tour.</p>'
+            '</div>'
+            '<div class="ob-actions">'
+            '<a href="/contacts/new" class="btn">Add a contact</a>'
+            '<a href="/contacts" class="btn secondary">Import CSV</a>'
+            '<a href="#" class="btn secondary" data-action="start-tour">Take the tour</a>'
+            '</div></div>'
+        )
+    else:
+        onboarding = ""
+
     return HTMLResponse(_render(
         "dashboard.html",
         topnav=_topnav("home", sess, csrf),
+        onboarding=onboarding,
         contacts=str(contact_count),
         companies=str(company_count),
         open_deals=str(open_deals),
@@ -501,7 +655,28 @@ def contacts_page(request: Request, q: str = "", show_deleted: int = 0):
             f'<td>{_h(c.get("phone") or "")}</td>'
             f'<td>{_h(c.get("title") or "")} {restore_btn}</td></tr>'
         )
-    rows_html = "\n".join(rows) or '<tr><td colspan="5" class="empty">No contacts yet. Add one below.</td></tr>'
+    if rows:
+        rows_html = "\n".join(rows)
+    elif q or show_del:
+        # Filtered/searched, no matches — short inline message.
+        rows_html = ('<tr><td colspan="5" class="empty">'
+                     'No contacts match your filter. Try clearing the search.'
+                     '</td></tr>')
+    else:
+        # Truly empty CRM — hero empty state with CTAs.
+        rows_html = (
+            '<tr><td colspan="5" class="empty-cell">'
+            '<div class="empty-state empty-state-inline">'
+            '<div class="empty-icon">👥</div>'
+            '<h3>No contacts yet</h3>'
+            '<p>Contacts are the people you track — leads, customers, partners. '
+            'Add one by hand, paste a CSV, or wire up a form to collect them automatically.</p>'
+            '<div class="empty-actions">'
+            '<a href="#contact-create" class="btn">Add a contact</a>'
+            '<a href="/forms" class="btn secondary">Create a lead form</a>'
+            '</div></div>'
+            '</td></tr>'
+        )
     return HTMLResponse(_render(
         "contacts.html",
         topnav=_topnav("contacts", sess, csrf),
@@ -902,7 +1077,24 @@ def companies_page(request: Request, q: str = "", show_deleted: int = 0):
             f'<td>{_h(c.get("industry") or "")}</td>'
             f'<td>{_h(c.get("location") or "")} {restore_btn}</td></tr>'
         )
-    rows_html = "\n".join(rows) or '<tr><td colspan="5" class="empty">No companies yet. Add one below.</td></tr>'
+    if rows:
+        rows_html = "\n".join(rows)
+    elif q or show_del:
+        rows_html = ('<tr><td colspan="5" class="empty">'
+                     'No companies match your filter.</td></tr>')
+    else:
+        rows_html = (
+            '<tr><td colspan="5" class="empty-cell">'
+            '<div class="empty-state empty-state-inline">'
+            '<div class="empty-icon">🏢</div>'
+            '<h3>No companies yet</h3>'
+            '<p>Companies are the organizations your contacts work for. '
+            'Add them to roll up activity by org instead of just by person.</p>'
+            '<div class="empty-actions">'
+            '<a href="#company-create" class="btn">Add a company</a>'
+            '<a href="/contacts" class="btn secondary">Back to contacts</a>'
+            '</div></div></td></tr>'
+        )
     return HTMLResponse(_render(
         "companies.html",
         topnav=_topnav("companies", sess, csrf),
@@ -1497,7 +1689,27 @@ def tasks_page(request: Request, view: str = "open"):
     csrf = auth_mod.csrf_token_for(sess["id"])
     rows = "".join(_task_row_html(t, csrf) for t in result["items"])
     if not rows:
-        rows = '<tr><td colspan="6" class="empty">No tasks match this view.</td></tr>'
+        if view == "open" and result["total"] == 0:
+            rows = (
+                '<tr><td colspan="6" class="empty-cell">'
+                '<div class="empty-state empty-state-inline">'
+                '<div class="empty-icon">✓</div>'
+                '<h3>No tasks here</h3>'
+                '<p>Tasks attach to contacts, companies, or deals. They show up on '
+                'every record they\'re linked to, and the dashboard surfaces overdue ones.</p>'
+                '<div class="empty-actions">'
+                '<a href="/contacts" class="btn">Open a contact</a>'
+                '<a href="/pipelines" class="btn secondary">Open a deal</a>'
+                '</div></div></td></tr>'
+            )
+        elif view == "overdue":
+            rows = ('<tr><td colspan="6" class="empty">'
+                    '🎉 Nothing overdue. Inbox-zero territory.</td></tr>')
+        elif view == "done":
+            rows = ('<tr><td colspan="6" class="empty">'
+                    'No completed tasks. Mark some open ones with ✓ to populate.</td></tr>')
+        else:
+            rows = '<tr><td colspan="6" class="empty">No tasks match this view.</td></tr>'
 
     def _tab(label, key):
         cls = "active" if key == view else ""
@@ -1885,7 +2097,20 @@ def forms_page(request: Request, created: str = ""):
             f'<td class="mono faint">{_h(f.get("created_at"))}</td>'
             f'</tr>'
         )
-    rows_html = "\n".join(rows) or '<tr><td colspan="4" class="empty">No forms yet. Create one below.</td></tr>'
+    if rows:
+        rows_html = "\n".join(rows)
+    else:
+        rows_html = (
+            '<tr><td colspan="4" class="empty-cell">'
+            '<div class="empty-state empty-state-inline">'
+            '<div class="empty-icon">📝</div>'
+            '<h3>No forms yet</h3>'
+            '<p>Forms collect leads automatically. Each one gets a public URL '
+            'you can embed, share, or link from anywhere — submissions become '
+            'real contacts in this CRM, with full timeline + tagging.</p>'
+            '<p class="empty-tip">Below: a starter schema you can edit anytime.</p>'
+            '</div></td></tr>'
+        )
 
     created_block = (
         f'<div class="flash success">Form created. Public URL: '

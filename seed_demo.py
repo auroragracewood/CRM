@@ -221,5 +221,23 @@ def main():
             print(f"    {s}")
 
 
+def ensure_demo_user():
+    """Demo deployments: well-known login advertised on the sign-in page.
+    (backend.main renders the banner only when this account exists.)"""
+    from backend import auth
+    from backend.db import db
+    with db() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE email='demo@crm.local'").fetchone():
+            return
+        now = int(time.time())
+        conn.execute(
+            "INSERT INTO users (email, password_hash, display_name, role, created_at, updated_at)"
+            " VALUES (?,?,?,?,?,?)",
+            ("demo@crm.local", auth.hash_password("demo1234"), "Demo User", "admin", now, now),
+        )
+    print("demo user ensured: demo@crm.local / demo1234 (admin)")
+
+
 if __name__ == "__main__":
     main()
+    ensure_demo_user()

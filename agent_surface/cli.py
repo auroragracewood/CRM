@@ -49,6 +49,7 @@ from backend.services import (  # noqa: E402
     saved_views as saved_views_service,
 )
 from backend.services.contacts import ServiceError  # noqa: E402
+from backend.services import users as users_service  # noqa: E402
 
 
 def _resolve_user(args) -> tuple[int, str]:
@@ -651,6 +652,29 @@ def cmd_view_delete(args):
     _print({"ok": True, **out})
 
 
+
+def cmd_user_list(args):
+    _print(_handle(args, users_service.list_))
+
+
+def cmd_user_create(args):
+    out = _handle(args, users_service.create_user,
+                  email=args.email, password=args.password,
+                  display_name=args.display_name, role=args.role)
+    _print(out)
+
+
+def cmd_user_set_password(args):
+    out = _handle(args, users_service.change_password, args.id,
+                  current_password=None, new_password=args.password)
+    _print(out)
+
+
+def cmd_user_set_role(args):
+    out = _handle(args, users_service.set_role, args.id, args.role)
+    _print(out)
+
+
 def cmd_backup_create(args):
     src = Path(DB_PATH)
     if not src.exists():
@@ -1027,6 +1051,28 @@ def build_parser():
     v_l.set_defaults(func=cmd_view_list)
     v_d = v_sub.add_parser("delete"); v_d.add_argument("--id", type=int, required=True)
     v_d.set_defaults(func=cmd_view_delete)
+
+    # user (admin account management; pairs with the Settings UI)
+    user = sub.add_parser("user", help="User account commands (admin)")
+    usub = user.add_subparsers(dest="action", required=True)
+    u_l = usub.add_parser("list"); u_l.set_defaults(func=cmd_user_list)
+    u_c = usub.add_parser("create")
+    u_c.add_argument("--email", required=True)
+    u_c.add_argument("--password", required=True)
+    u_c.add_argument("--display-name", dest="display_name")
+    u_c.add_argument("--role", default="user",
+                     choices=sorted(users_service.VALID_ROLES))
+    u_c.set_defaults(func=cmd_user_create)
+    u_p = usub.add_parser("set-password",
+                          help="Admin password reset (no current password needed)")
+    u_p.add_argument("--id", type=int, required=True)
+    u_p.add_argument("--password", required=True)
+    u_p.set_defaults(func=cmd_user_set_password)
+    u_r = usub.add_parser("set-role")
+    u_r.add_argument("--id", type=int, required=True)
+    u_r.add_argument("--role", required=True,
+                     choices=sorted(users_service.VALID_ROLES))
+    u_r.set_defaults(func=cmd_user_set_role)
 
     # backup
     backup = sub.add_parser("backup", help="Backup commands")
