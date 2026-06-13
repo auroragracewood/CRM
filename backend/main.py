@@ -280,8 +280,8 @@ def _topnav(active: str, sess: dict, csrf: str) -> str:
 
 # ---------- login / logout ----------
 
-DEMO_EMAIL = "demo@crm.local"
-DEMO_PASSWORD = "demo1234"  # shown openly on the login page when the demo account exists
+DEMO_EMAIL = "example@email.com"
+DEMO_PASSWORD = "password"  # shown openly on the login page when the demo account exists
 
 
 def _demo_banner() -> str:
@@ -297,13 +297,11 @@ def _demo_banner() -> str:
         "document.getElementById('login-password').value='" + DEMO_PASSWORD + "';"
         "document.getElementById('login-form').submit()"
     )
+    # Small one-line banner: creds + a subtle click-to-fill link.
     return (
         '<div class="login-demo">'
-        '<div class="login-demo-title">Try the live demo</div>'
-        f'<div class="login-demo-creds">Email: <code>{DEMO_EMAIL}</code> &middot; '
-        f'Password: <code>{DEMO_PASSWORD}</code></div>'
-        f'<button type="button" class="btn login-demo-fill" onclick="{fill_js}">'
-        'Sign in as demo &rarr;</button>'
+        f'demo &middot; <code>{DEMO_EMAIL}</code> / <code>{DEMO_PASSWORD}</code>'
+        f' &middot; <a href="#" onclick="{fill_js};return false">sign in &rarr;</a>'
         '</div>'
     )
 

@@ -227,15 +227,15 @@ def ensure_demo_user():
     from backend import auth
     from backend.db import db
     with db() as conn:
-        if conn.execute("SELECT 1 FROM users WHERE email='demo@crm.local'").fetchone():
+        if conn.execute("SELECT 1 FROM users WHERE email='example@email.com'").fetchone():
             return
         now = int(time.time())
         conn.execute(
             "INSERT INTO users (email, password_hash, display_name, role, created_at, updated_at)"
             " VALUES (?,?,?,?,?,?)",
-            ("demo@crm.local", auth.hash_password("demo1234"), "Demo User", "admin", now, now),
+            ("example@email.com", auth.hash_password("password"), "Demo User", "admin", now, now),
         )
-    print("demo user ensured: demo@crm.local / demo1234 (admin)")
+    print("demo user ensured: example@email.com / password (admin)")
 
 
 if __name__ == "__main__":

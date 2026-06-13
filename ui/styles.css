@@ -1358,20 +1358,20 @@ body.kbd-chord-active::before {
 }
 
 
-/* ---------- demo-account banner on the login page ---------- */
+/* ---------- demo-account banner on the login page (small, one line) ---------- */
 .login-demo {
-  margin: 0 0 18px;
-  padding: 12px 14px;
+  margin: 0 0 14px;
+  padding: 6px 10px;
   border: 1px dashed var(--accent, #4f7cff);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent, #4f7cff) 7%, transparent);
-  font-size: 13px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent, #4f7cff) 6%, transparent);
+  font-size: 12px;
+  color: var(--muted, inherit);
+  text-align: center;
 }
-.login-demo-title { font-weight: 700; margin-bottom: 4px; }
-.login-demo-creds { margin-bottom: 8px; }
-.login-demo-creds code {
-  padding: 1px 6px; border-radius: 4px;
+.login-demo code {
+  padding: 0 4px; border-radius: 3px;
   background: var(--surface-2, rgba(127,127,127,.15));
   user-select: all;
 }
-.login-demo-fill { font-size: 12px; padding: 5px 12px; cursor: pointer; }
+.login-demo a { font-weight: 600; }

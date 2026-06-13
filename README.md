@@ -57,7 +57,7 @@ Want visitors to walk straight in? Create the well-known demo account:
 python seed_demo.py        # demo data AND the demo user
 ```
 
-That creates **`demo@crm.local` / `demo1234`** (admin). When this account
+That creates **`example@email.com` / `password`** (admin). When this account
 exists, the sign-in page automatically shows the credentials and a
 one-click **"Sign in as demo"** button. Self-hosters who never create the
 account never see the banner — no config flag needed.
