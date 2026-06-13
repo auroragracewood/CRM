@@ -297,11 +297,15 @@ def _demo_banner() -> str:
         "document.getElementById('login-password').value='" + DEMO_PASSWORD + "';"
         "document.getElementById('login-form').submit()"
     )
-    # Small one-line banner: creds + a subtle click-to-fill link.
+    # Small one-line banner above the card. Inline-styled on purpose: immune to
+    # theme overrides, stylesheet caching, and selector-specificity drift.
     return (
-        '<div class="login-demo">'
-        f'demo &middot; <code>{DEMO_EMAIL}</code> / <code>{DEMO_PASSWORD}</code>'
-        f' &middot; <a href="#" onclick="{fill_js};return false">sign in &rarr;</a>'
+        '<div class="login-demo" style="order:-1;width:100%;max-width:360px;'
+        'margin:0 0 10px;padding:7px 12px;background:#fff;color:#222;'
+        'border:1px dashed #999;border-radius:6px;font-size:12px;text-align:center;'
+        'box-sizing:border-box">'
+        f'<code>{DEMO_EMAIL}</code> / <code>{DEMO_PASSWORD}</code>'
+        f' &middot; <a href="#" onclick="{fill_js};return false">sign in</a>'
         '</div>'
     )
 

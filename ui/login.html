@@ -8,18 +8,15 @@
 </head>
 <body class="login-page">
 <a href="#" class="theme-toggle theme-toggle-floating" title="Toggle theme">◐</a>
-<div class="login-shell">
-  <div class="login-card">
+<div class="login-shell" style="display:flex;flex-direction:column;align-items:center">
+  {{demo}}
+  <div class="login-card" style="width:100%;max-width:360px">
     <div class="login-brand">
       <div class="login-brand-mark">CRM</div>
-      <div>
-        <div class="login-brand-name">CRM</div>
-        <div class="login-brand-tag">Open-source · self-hosted · agent-ready</div>
-      </div>
+      <div class="login-brand-tag">Open-source · self-hosted · agent-ready</div>
     </div>
     <h1>Sign in</h1>
     {{error}}
-    {{demo}}
     <form id="login-form" method="post" action="/login" autocomplete="on">
       <div class="row">
         <label for="login-email">Email</label>
